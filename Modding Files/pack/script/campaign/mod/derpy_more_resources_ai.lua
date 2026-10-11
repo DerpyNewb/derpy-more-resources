@@ -41,9 +41,19 @@ MR_AI.REGIONS = {
         ["cr_oldworld_region_mangrove_port"] = true,
         ["cr_oldworld_region_soteks_trail"] = true,
         ["cr_oldworld_region_village_of_the_leopard_skins"] = true,
+        ["wh3_main_combi_region_caverns_of_sotek"] = true,
         ["wh3_main_combi_region_cuexotl"] = true,
+        ["wh3_main_combi_region_nahuontl"] = true,
+        ["wh3_main_combi_region_serpent_coast"] = true,
+        ["wh3_main_combi_region_statues_of_the_gods"] = true,
+        ["wh3_main_combi_region_temple_avenue_of_gold"] = true,
+        ["wh3_main_combi_region_temple_of_skulls"] = true,
         ["wh3_main_combi_region_teotiqua"] = true,
+        ["wh3_main_combi_region_the_cursed_jungle"] = true,
         ["wh3_main_combi_region_the_golden_tower"] = true,
+        ["wh3_main_combi_region_tlaqua"] = true,
+        ["wh3_main_combi_region_yuatek"] = true,
+        ["wh3_main_combi_region_zlatlan"] = true,
     },
     dragon_bone = {
         ["cr_oldworld_region_darkhold"] = true,
@@ -51,11 +61,15 @@ MR_AI.REGIONS = {
         ["cr_oldworld_region_dragonhorn_mines"] = true,
         ["cr_oldworld_region_dragons_death"] = true,
         ["cr_oldworld_region_the_bone_gulch"] = true,
+        ["wh3_dlc20_combi_region_dragons_death"] = true,
         ["wh3_main_chaos_region_darkhold"] = true,
         ["wh3_main_chaos_region_dragon_fang_mount"] = true,
+        ["wh3_main_chaos_region_dragons_death"] = true,
+        ["wh3_main_combi_region_darkhold"] = true,
         ["wh3_main_combi_region_dragon_fang_mount"] = true,
         ["wh3_main_combi_region_dragonhorn_mines"] = true,
         ["wh3_main_combi_region_the_bone_gulch"] = true,
+        ["wh3_main_combi_region_tor_sethai"] = true,
         ["wh3_main_combi_region_vauls_anvil_ulthuan"] = true,
     },
     feathers = {
@@ -75,9 +89,19 @@ MR_AI.REGIONS = {
         ["cr_oldworld_region_siernos"] = true,
         ["cr_oldworld_region_turin"] = true,
         ["cr_oldworld_region_valley_of_windmills"] = true,
+        ["wh3_dlc20_chaos_region_grung_zint"] = true,
+        ["wh3_main_chaos_region_blackstone_tower"] = true,
         ["wh3_main_chaos_region_brass_keep"] = true,
+        ["wh3_main_chaos_region_castle_drachenfels"] = true,
+        ["wh3_main_chaos_region_grim_duraz"] = true,
+        ["wh3_main_chaos_region_gristle_valley"] = true,
+        ["wh3_main_chaos_region_karak_azgaraz"] = true,
+        ["wh3_main_chaos_region_karak_ziflin"] = true,
         ["wh3_main_combi_region_blackstone_post"] = true,
         ["wh3_main_combi_region_brass_keep"] = true,
+        ["wh3_main_combi_region_grung_zint"] = true,
+        ["wh3_main_combi_region_karak_angazhar"] = true,
+        ["wh3_main_combi_region_karak_ziflin"] = true,
         ["wh3_main_combi_region_massif_orcal"] = true,
         ["wh3_main_combi_region_the_black_pit"] = true,
     },
@@ -95,9 +119,13 @@ MR_AI.REGIONS = {
         ["cr_oldworld_region_kraka_ornsmotek"] = true,
         ["cr_oldworld_region_lost_archway_of_valaya"] = true,
         ["cr_oldworld_region_stormvrack_mount"] = true,
+        ["wh3_main_chaos_region_karak_vrag"] = true,
         ["wh3_main_chaos_region_kraka_drak"] = true,
         ["wh3_main_chaos_region_mount_gunbad"] = true,
+        ["wh3_main_chaos_region_zhufbar"] = true,
         ["wh3_main_combi_region_black_crag"] = true,
+        ["wh3_main_combi_region_black_iron_mine"] = true,
+        ["wh3_main_combi_region_eye_of_the_panther"] = true,
         ["wh3_main_combi_region_karak_azgal"] = true,
         ["wh3_main_combi_region_karak_hirn"] = true,
         ["wh3_main_combi_region_karak_ungor"] = true,
@@ -112,14 +140,24 @@ MR_AI.REGIONS = {
     ithilmar = {
         ["wh3_main_combi_region_tor_anlec"] = true,
         ["wh3_main_combi_region_tor_anroc"] = true,
+        ["wh3_main_combi_region_tor_finu"] = true,
         ["wh3_main_combi_region_vauls_anvil_ulthuan"] = true,
+        ["wh3_main_combi_region_whitefire_tor"] = true,
+        ["wh3_main_combi_region_whitepeak"] = true,
     },
     sea_dragon_hide = {
         ["wh3_main_combi_region_arnheim"] = true,
+        ["wh3_main_combi_region_blacklight_tower"] = true,
+        ["wh3_main_combi_region_circle_of_destruction"] = true,
         ["wh3_main_combi_region_fortress_of_the_damned"] = true,
+        ["wh3_main_combi_region_grey_rock_point"] = true,
         ["wh3_main_combi_region_hag_graef"] = true,
         ["wh3_main_combi_region_karond_kar"] = true,
         ["wh3_main_combi_region_naggarond"] = true,
+        ["wh3_main_combi_region_nagrar"] = true,
+        ["wh3_main_combi_region_shagrath"] = true,
+        ["wh3_main_combi_region_slavers_point"] = true,
+        ["wh3_main_combi_region_the_moon_shard"] = true,
         ["wh3_main_combi_region_the_twisted_glade"] = true,
     },
     starwood = {
@@ -191,11 +229,16 @@ MR_AI.REGIONS = {
         ["cr_oldworld_region_the_horn"] = true,
         ["cr_oldworld_region_thunderhoof_camp"] = true,
         ["wh3_main_combi_region_amblepeak"] = true,
+        ["wh3_main_combi_region_black_fang"] = true,
         ["wh3_main_combi_region_bloodpeak"] = true,
         ["wh3_main_combi_region_deff_gorge"] = true,
+        ["wh3_main_combi_region_eagle_eyries"] = true,
         ["wh3_main_combi_region_fire_mouth"] = true,
         ["wh3_main_combi_region_gorger_rock"] = true,
+        ["wh3_main_combi_region_granite_spikes"] = true,
+        ["wh3_main_combi_region_great_hall_of_greasus"] = true,
         ["wh3_main_combi_region_grimtop"] = true,
+        ["wh3_main_combi_region_karak_azorn"] = true,
         ["wh3_main_combi_region_karak_krakaten"] = true,
         ["wh3_main_combi_region_karak_vrag"] = true,
         ["wh3_main_combi_region_sabre_mountain"] = true,
@@ -248,6 +291,18 @@ function MR_AI.find(region, chain)
     return nil, nil
 end
 
+-- An empty secondary slot, or nil.
+function MR_AI.free(region)
+    local slots = region:slot_list()
+    for i = 0, slots:num_items() - 1 do
+        local s = slots:item_at(i)
+        if s:active() and not s:has_building() and not s:is_working() and s:type() == "secondary" then
+            return s
+        end
+    end
+    return nil
+end
+
 -- What this faction may build: {good, chain, region} for every owned lore region.
 function MR_AI.options(faction)
     local out_, culture = {}, faction:culture()
@@ -287,16 +342,17 @@ function MR_AI.act(faction)
         end
     end
     for _, o in ipairs(opts) do
-        if not MR_AI.find(o[3], o[2]) and MR_AI.tier(o[3]) >= MR_AI.REQ[1] and afford(MR_AI.COST[1]) then
+        local free = not MR_AI.find(o[3], o[2]) and MR_AI.free(o[3])
+        if free and MR_AI.tier(o[3]) >= MR_AI.REQ[1] and afford(MR_AI.COST[1]) then
             local want = o[2] .. "_1"
-            cm:add_building_to_settlement(o[3]:name(), want)
+            cm:instantly_upgrade_building_in_region(free, want)
             if MR_AI.find(o[3], o[2]) then
                 cm:treasury_mod(fname, -MR_AI.COST[1])
                 say(fname .. " built " .. want .. " in " .. o[3]:name())
                 return "build " .. want .. " " .. o[3]:name()
             end
-            -- no free slot that takes it: try the next region, and say so once in the log
-            say(fname .. " found no slot for " .. want .. " in " .. o[3]:name())
+            -- the engine placed nothing: try the next region, and say so in the log
+            say(fname .. " could not build " .. want .. " in " .. o[3]:name())
         end
     end
     return nil

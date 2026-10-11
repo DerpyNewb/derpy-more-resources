@@ -5,19 +5,24 @@ core = nil
 out = nil
 local TURN = 1
 local BUILT, UPGRADED = {}, {}
-local REFUSE_ADD = {}            -- region key -> true: the engine finds no slot that takes it
+local REFUSE = false             -- the engine places nothing
 
-local function slot(name)
-    local s = { name_ = name }
+local function slot(name, kind)
+    local s = { name_ = name, kind = kind or "secondary" }
     s.has_building = function() return s.name_ ~= nil end
     s.building = function() return { name = function() return s.name_ end } end
+    s.active = function() return not s.off end
+    s.is_working = function() return s.busy == true end
+    s.type = function() return s.kind end
     return s
 end
 
 local REGIONS = {}
+-- a primary, the buildings given, then ONE empty secondary slot (always the last)
 local function region(key, tier, buildings)
-    local slots = { slot("primary") }
+    local slots = { slot("primary", "primary") }
     for _, b in ipairs(buildings or {}) do slots[#slots + 1] = slot(b) end
+    slots[#slots + 1] = slot(nil)
     local r = { key = key, slots = slots }
     r.name = function() return key end
     r.settlement = function() return { primary_slot = function() return { building = function()
@@ -45,15 +50,13 @@ end
 local FACTIONS = {}
 cm = {
     model = function() return { turn_number = function() return TURN end } end,
-    add_building_to_settlement = function(_, rkey, building)
-        if REFUSE_ADD[rkey] then return end
-        local r = REGIONS[rkey]
-        r.slots[#r.slots + 1] = slot(building)
-        BUILT[#BUILT + 1] = building
-    end,
+    -- the engine as measured on a slot template that does not offer the chain (TRADE_RESOURCES.md
+    -- 35a): add_building_to_settlement places nothing, instantly_upgrade_building_in_region places it
+    add_building_to_settlement = function() end,
     instantly_upgrade_building_in_region = function(_, s, building)
+        if REFUSE then return end
+        if s.name_ then UPGRADED[#UPGRADED + 1] = building else BUILT[#BUILT + 1] = building end
         s.name_ = building
-        UPGRADED[#UPGRADED + 1] = building
     end,
     treasury_mod = function(_, fname, n) FACTIONS[fname].gold = FACTIONS[fname].gold + n end,
 }
@@ -69,17 +72,19 @@ end
 local G1, G2 = first_key(MR_AI.REGIONS.gromril)
 local CH = MR_AI.CHAIN.gromril.wh_main_dwf_dwarfs
 assert(G1 and G2 and CH, "the data has no gromril region pair or no dwarf chain")
+local function empty(r) return r.slots[#r.slots].name_ == nil end
 
 -- 1. A Dwarf faction with one lore region (tier 2) and one that is not: it builds in the lore
---    region, pays CA's price, and leaves the other alone.
+--    region's empty slot, pays CA's price, and leaves the other alone.
 local lore = region(G1, 2)
 local plain = region("not_a_lore_region", 5)
 local dwf = faction("dwf_a", "wh_main_dwf_dwarfs", 10000, { plain, lore })
 FACTIONS.dwf_a = dwf
 local did = MR_AI.act(dwf)
 assert(did == "build " .. CH .. "_1 " .. G1, "first action: " .. tostring(did))
+assert(lore.slots[2].name_ == CH .. "_1", "not in the empty secondary slot")
 assert(dwf.gold == 10000 - MR_AI.COST[1], "charged " .. (10000 - dwf.gold))
-assert(#plain.slots == 1, "built in a region where the building makes nothing")
+assert(empty(plain), "built in a region where the building makes nothing")
 
 -- 2. Next action upgrades it, the tier allowing level 2.
 did = MR_AI.act(dwf)
@@ -95,20 +100,34 @@ assert(did == nil and dwf.gold == before, "upgraded past the settlement tier: " 
 local poor_r = region(G2, 3)
 local poor = faction("dwf_poor", "wh_main_dwf_dwarfs", MR_AI.COST[1] * MR_AI.RESERVE - 1, { poor_r })
 FACTIONS.dwf_poor = poor
-assert(MR_AI.act(poor) == nil and #poor_r.slots == 1, "spent below the reserve")
+assert(MR_AI.act(poor) == nil and empty(poor_r), "spent below the reserve")
 
--- 5. The engine finds no slot: no building, no charge.
+-- 5. The engine places nothing: no building, no charge.
 poor.gold = 100000
-REFUSE_ADD[G2] = true
+REFUSE = true
 assert(MR_AI.act(poor) == nil and poor.gold == 100000, "charged for a building that never appeared")
-REFUSE_ADD[G2] = nil
+REFUSE = false
+
+-- 5b. No empty secondary slot: nothing tried, nothing charged.
+poor_r.slots[2].name_ = "a_tavern_1"
+local nb = #BUILT
+assert(MR_AI.act(poor) == nil and poor.gold == 100000 and #BUILT == nb, "built with no empty slot")
+poor_r.slots[2].name_ = nil
+
+-- 5c. The only empty slot is locked, being built in, or not a secondary slot: nothing tried.
+for _, k in ipairs({ "off", "busy", "port" }) do
+    local s = poor_r.slots[2]
+    if k == "port" then s.kind = "port" else s[k] = true end
+    assert(MR_AI.act(poor) == nil and #BUILT == nb, "built in a slot that is " .. k)
+    s.kind, s.off, s.busy = "secondary", nil, nil
+end
 
 -- 6. Another race in a gromril region builds nothing (gromril is Dwarf-only).
 local emp_r = region("emp_owned_" .. G2, 3)
 MR_AI.REGIONS.gromril["emp_owned_" .. G2] = true
 local emp = faction("emp_a", "wh_main_emp_empire", 100000, { emp_r })
 FACTIONS.emp_a = emp
-assert(MR_AI.act(emp) == nil and #emp_r.slots == 1, "an Empire faction built gromril")
+assert(MR_AI.act(emp) == nil and empty(emp_r), "an Empire faction built gromril")
 
 -- 7. Humans are never touched, even on a due turn.
 local me = faction("me", "wh_main_dwf_dwarfs", 100000, { region(G2 .. "_h", 3) }, true)
@@ -133,5 +152,5 @@ local broken = faction("broken", "wh_main_dwf_dwarfs", 100000, { lore })
 broken.region_list = function() error("boom") end
 for t = 1, MR_AI.PACE do TURN = t; MR_AI.turn(broken) end
 
-print(string.format("harness ok: built %d, upgraded %d; reserve, tier, no-slot, wrong race, human, pace, prefix and error cases",
+print(string.format("harness ok: built %d, upgraded %d; reserve, tier, not placed, no slot, wrong race, human, pace, prefix and error cases",
     #BUILT, #UPGRADED))

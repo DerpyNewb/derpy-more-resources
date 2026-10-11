@@ -165,6 +165,61 @@ DERPY_MR_FLOWS_ESCORT_OWN = {
     {"wh3_main_cth_art_fire_rain_rocket_battery_0", 1, "high"},
 }
 DERPY_MR_FLOWS_ESCORT_DROP = {wh2_main_def_mon_war_hydra = true, wh_dlc07_brt_peasant_mob_0 = true, wh_dlc08_nor_mon_warwolves_0 = true, wh_dlc08_nor_veh_marauder_warwolves_chariot_0 = true, wh_main_emp_veh_steam_tank = true}
+DERPY_MR_FLOWS_FOUND = {
+    wh3_dlc20_chaos_region_grung_zint = "feathers",
+    wh3_dlc20_combi_region_dragons_death = "dragon_bone",
+    wh3_main_chaos_region_blackstone_tower = "feathers",
+    wh3_main_chaos_region_castle_drachenfels = "feathers",
+    wh3_main_chaos_region_dragons_death = "dragon_bone",
+    wh3_main_chaos_region_grim_duraz = "feathers",
+    wh3_main_chaos_region_gristle_valley = "feathers",
+    wh3_main_chaos_region_karak_azgaraz = "feathers",
+    wh3_main_chaos_region_karak_vrag = "gromril",
+    wh3_main_chaos_region_karak_ziflin = "feathers",
+    wh3_main_chaos_region_zhufbar = "gromril",
+    wh3_main_combi_region_black_fang = "wyvern_scales",
+    wh3_main_combi_region_black_iron_mine = "gromril",
+    wh3_main_combi_region_blacklight_tower = "sea_dragon_hide",
+    wh3_main_combi_region_caverns_of_sotek = "black_lotus",
+    wh3_main_combi_region_circle_of_destruction = "sea_dragon_hide",
+    wh3_main_combi_region_darkhold = "dragon_bone",
+    wh3_main_combi_region_eagle_eyries = "wyvern_scales",
+    wh3_main_combi_region_eye_of_the_panther = "gromril",
+    wh3_main_combi_region_granite_spikes = "wyvern_scales",
+    wh3_main_combi_region_great_hall_of_greasus = "wyvern_scales",
+    wh3_main_combi_region_grey_rock_point = "sea_dragon_hide",
+    wh3_main_combi_region_grung_zint = "feathers",
+    wh3_main_combi_region_karak_angazhar = "feathers",
+    wh3_main_combi_region_karak_azorn = "wyvern_scales",
+    wh3_main_combi_region_karak_ziflin = "feathers",
+    wh3_main_combi_region_nagrar = "sea_dragon_hide",
+    wh3_main_combi_region_nahuontl = "black_lotus",
+    wh3_main_combi_region_serpent_coast = "black_lotus",
+    wh3_main_combi_region_shagrath = "sea_dragon_hide",
+    wh3_main_combi_region_slavers_point = "sea_dragon_hide",
+    wh3_main_combi_region_statues_of_the_gods = "black_lotus",
+    wh3_main_combi_region_temple_avenue_of_gold = "black_lotus",
+    wh3_main_combi_region_temple_of_skulls = "black_lotus",
+    wh3_main_combi_region_the_cursed_jungle = "black_lotus",
+    wh3_main_combi_region_the_moon_shard = "sea_dragon_hide",
+    wh3_main_combi_region_tlaqua = "black_lotus",
+    wh3_main_combi_region_tor_finu = "ithilmar",
+    wh3_main_combi_region_tor_sethai = "dragon_bone",
+    wh3_main_combi_region_whitefire_tor = "ithilmar",
+    wh3_main_combi_region_whitepeak = "ithilmar",
+    wh3_main_combi_region_yuatek = "black_lotus",
+    wh3_main_combi_region_zlatlan = "black_lotus",
+}
+DERPY_MR_FLOWS_FOUND_CHAIN = {
+    black_lotus = {wh2_main_def_dark_elves = "derpy_mr_bld_black_lotus_def", wh2_main_skv_skaven = "derpy_mr_bld_black_lotus_skv"},
+    dragon_bone = {wh_main_brt_bretonnia = "derpy_mr_bld_dragon_bone_brt", wh3_dlc23_chd_chaos_dwarfs = "derpy_mr_bld_dragon_bone_chd", wh_main_chs_chaos = "derpy_mr_bld_dragon_bone_chs", wh2_dlc11_cst_vampire_coast = "derpy_mr_bld_dragon_bone_cst", wh3_main_cth_cathay = "derpy_mr_bld_dragon_bone_cth", wh2_main_def_dark_elves = "derpy_mr_bld_dragon_bone_def", wh_main_dwf_dwarfs = "derpy_mr_bld_dragon_bone_dwf", wh_main_emp_empire = "derpy_mr_bld_dragon_bone_emp", wh_main_grn_greenskins = "derpy_mr_bld_dragon_bone_grn", wh2_main_hef_high_elves = "derpy_mr_bld_dragon_bone_hef", wh3_main_ksl_kislev = "derpy_mr_bld_dragon_bone_ksl", wh2_main_lzd_lizardmen = "derpy_mr_bld_dragon_bone_lzd", wh_dlc08_nor_norsca = "derpy_mr_bld_dragon_bone_nor", wh3_main_ogr_ogre_kingdoms = "derpy_mr_bld_dragon_bone_ogr", wh2_main_skv_skaven = "derpy_mr_bld_dragon_bone_skv", wh_main_vmp_vampire_counts = "derpy_mr_bld_dragon_bone_vmp", wh_dlc05_wef_wood_elves = "derpy_mr_bld_dragon_bone_wef"},
+    feathers = {wh_main_brt_bretonnia = "derpy_mr_bld_feathers_brt", wh_main_emp_empire = "derpy_mr_bld_feathers_emp"},
+    gromril = {wh_main_dwf_dwarfs = "derpy_mr_bld_gromril"},
+    ithilmar = {wh2_main_hef_high_elves = "derpy_mr_bld_ithilmar"},
+    sea_dragon_hide = {wh2_main_def_dark_elves = "derpy_mr_bld_sea_dragon_hide"},
+    wyvern_scales = {wh_main_grn_greenskins = "derpy_mr_bld_wyvern_scales_grn", wh3_main_ogr_ogre_kingdoms = "derpy_mr_bld_wyvern_scales_ogr"},
+}
+DERPY_MR_FLOWS_FOUND_LEVELS = {cost = {1000, 2000, 3000}, req = {1, 2, 3}}
 DERPY_MR_FLOWS_NO_STORES = {"dae", "kho", "nur", "sla", "tze", "tmb", "nag", "bst"}
 DERPY_MR_FLOWS_BUNDLES = {
     provisions = "derpy_mr_well_fed",
@@ -1557,7 +1612,7 @@ end
 
 -- THE ONE DOOR. parts = {action, args...}: a trade switch (export|import, stem), or an action
 -- with exactly its own count of parts. Humans only; the actions only with the MCT switch on.
-F.ACTIONS = { send = 3, order = 2, sell = 2, supply = 3, work = 2, upgrade = 3, aim = 3 }
+F.ACTIONS = { send = 3, order = 2, sell = 2, supply = 3, work = 2, upgrade = 3, aim = 3, found = 2 }
 function F.dispatch(fkey, parts)
     if not F.is_human(fkey) then return end
     local a = parts[1]
@@ -1576,6 +1631,7 @@ function F.dispatch(fkey, parts)
     elseif a == "aim" then
         local cqi = tonumber(parts[3])
         if cqi then F.work(f, parts[2], nil, cqi) end
+    elseif a == "found" then F.found(f, parts[2])
     else F.sell(f, parts[2]) end
 end
 
@@ -2320,6 +2376,80 @@ function F.sweep()
             local f = cm:get_faction(buyer)
             if not f or f:is_null_interface() or f:is_dead() then ups[key] = nil end
         end
+    end
+    -- a dead faction's event record and supply switches, kept in the save for nothing
+    for _, book in ipairs({ F.state.events or {}, F.state.supply or {} }) do
+        for fkey in pairs(book) do
+            local f = cm:get_faction(fkey)
+            if not f or f:is_null_interface() or f:is_dead() then book[fkey] = nil end
+        end
+    end
+end
+
+-- ---- FOUNDING A RARE BUILDING where no slot offers it (spec 2026-10-09) ---------------------
+-- A lore region on a slot template other regions share is offered nothing by a slot; the Vault's
+-- settlement view founds the building by script, for CA's gold price, charged only once it stands.
+-- The region's slot holding a level of any race's chain of `good`: slot, level, chain; nil, 0, nil.
+function F.found_slot(region, good)
+    local sl = region:settlement():slot_list()
+    for i = 0, sl:num_items() - 1 do
+        local s = sl:item_at(i)
+        if s:has_building() then
+            local b = s:building():name()
+            for _, ch in pairs(DERPY_MR_FLOWS_FOUND_CHAIN[good]) do
+                local n = string.sub(b, 1, #ch + 1) == ch .. "_" and tonumber(string.sub(b, #ch + 2))
+                if n then return s, n, ch end
+            end
+        end
+    end
+    return nil, 0, nil
+end
+
+-- An empty secondary slot, or nil. Level 1 goes into it with instantly_upgrade_building_in_region,
+-- which ignores the slot template; add_building_to_settlement honours it and places nothing here
+-- (measured 2026-10-10, TRADE_RESOURCES.md 35a).
+function F.found_free(region)
+    local sl = region:settlement():slot_list()
+    for i = 0, sl:num_items() - 1 do
+        local s = sl:item_at(i)
+        if s:active() and not s:has_building() and not s:is_working() and s:type() == "secondary" then
+            return s
+        end
+    end
+    return nil
+end
+
+-- What the drill-down's row shows; nil when there is no row.
+function F.found_state(faction, rkey)
+    local good = DERPY_MR_FLOWS_FOUND[rkey]
+    local chain = good and DERPY_MR_FLOWS_FOUND_CHAIN[good][faction:culture()]
+    local region = chain and F.owned(faction, rkey)
+    if not region then return nil end
+    local slot, level, there = F.found_slot(region, good)
+    if there and there ~= chain then return nil end      -- another race's: CA's own rules
+    if level >= 3 then return nil end      -- CA's browser will not upgrade it here either (35a, M2)
+    local nxt = level + 1
+    local st = { good = good, chain = chain, level = level, next = nxt, slot = slot or F.found_free(region),
+                 cost = DERPY_MR_FLOWS_FOUND_LEVELS.cost[nxt], tier_need = DERPY_MR_FLOWS_FOUND_LEVELS.req[nxt] }
+    local tier = 0
+    pcall(function() tier = region:settlement():primary_slot():building():building_level() end)
+    if faction:treasury() < st.cost then st.why = "gold"
+    elseif tier < st.tier_need then st.why = "tier"
+    elseif not st.slot then st.why = "slot" end
+    return st
+end
+
+-- The request: built, then looked for, and only then charged.
+function F.found(faction, rkey)
+    local st = F.found_state(faction, rkey)
+    if not st or st.why then return end
+    local want = st.chain .. "_" .. st.next
+    cm:instantly_upgrade_building_in_region(st.slot, want)
+    local _s, got = F.found_slot(F.owned(faction, rkey), st.good)
+    if got == st.next then
+        cm:treasury_mod(faction:name(), -st.cost)
+    else
+        F.say(faction:name() .. " could not build " .. want .. " in " .. rkey)
     end
 end
 

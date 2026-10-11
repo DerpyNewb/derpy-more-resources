@@ -1572,7 +1572,7 @@ Not a bug on reading: a seized shipment shows in the owner's history as moved an
 by orders/supplies/events; duty one way with "Other factions use their stores" off; Restore not
 offered on loot-and-occupy; our Underdeep coal/silver/brimstone rows on `building_to_building_own`
 where CA scopes that building `foreign_building_to_*` (probably makes nothing for trade; look in
-game). Also open: AI supply and event books never pruned (bounded, ~160 KB worst case);
+game). AI supply and event books: closed 2026-10-09, a dead faction's are dropped by `F.sweep` at a player's turn start (4 mutants caught, deployed `10fd5951`);
 `derpy_hub_mr.lua:109` says wrappers must be compared by Id, but line 337 compares with `==` and
 works (CA does the same, `lib_help_pages.lua:2592`); the hub is shared by four mods, so its comment
 is left. Deployed `b57c8802` to `data/` (backup `Backup/resource_overhaul_20261008_sweep_fixes/`).
@@ -1720,3 +1720,124 @@ battle whenever a player is one side; computer against computer is still a free 
   with the player as defender; the winner read correctly both ways; whether spawning the escort fires
   `UnitTrained`; the retreat lock holding; the escort's general; a raid from `AreaEntered` through the
   dilemma; the raid dilemma's text and the escort view's cards.
+
+## 35. Founding rare buildings (built 2026-10-10; switched to the call that works and retested in game 2026-10-11, 35b)
+
+Spec: `superpowers/specs/2026-10-09-resource-overhaul-founding-rare-buildings-design.md`. Plan:
+`superpowers/plans/2026-10-09-resource-overhaul-founding-rare-buildings.md`. The plan's first task,
+the in-game measurement (spec section 3, M1-M6), was done after tasks 2-5 (35a), because the game
+and the wh3 bridge were shut that session. The bullets below are the 2026-10-10 build; 35b supersedes
+the model, AI and switches bullets.
+
+- **The gap:** 43 lore regions (IE 33, RoC 10) of seven rare goods sit on slot templates other
+  regions share, so no slot offers their building (`gen_resource_overhaul.found_regions`). The map
+  mods have none.
+- **The row:** a settlement's stores view (Settlements tab, drill-down) of a listed region the
+  player holds shows one row above the goods: the building's level name ("Bone Pickers"), "Not
+  built", the price in the fourth column beside the button ("1000 gold"; under "Per turn" it read
+  as income), and **Found**. Greyed with "Needs 1000 gold." / "Needs a level N settlement." /
+  "Needs an empty building slot.". No row when another race's building of the same good stands
+  there (a captured region gets no second one), when the actions switch is off, or for a race with
+  no chain for the good.
+- **The model:** `F.found_state` / `F.found` in `flows.lua`, through `F.request(fkey, "found",
+  rkey)` like every other action (multiplayer-safe, humans only). Every level:
+  `cm:instantly_upgrade_building_in_region`, level 1 into an empty secondary slot (35b; this build
+  used `cm:add_building_to_settlement` for level 1, which placed nothing). **Gold is charged only once the building is found there afterwards**; otherwise nothing is
+  charged and a log line is written. CA's price and tier: 1000 / 2000 / 3000 gold, settlement level
+  1 / 2 / 3 (`LEVEL_DONOR`).
+- **The AI:** `ai_regions()` adds the 43, so `derpy_more_resources_ai.lua` builds there with no new
+  logic (+43 region lines, nothing else changed). Level 1 now goes through the same call as the
+  player's (35b).
+- **Switches:** removed 2026-10-11 once measured (35b). This build shipped `FOUND_UPGRADE = False`
+  and `FOUND_SLOT_TYPE = None`.
+- **Checked:** `check_found()` in `--check` and `--selftest` (three planted faults caught; 43
+  regions); the flows harness founding block (placed then charged, upgrade, every refusal, not
+  placed, another race's building, a Greenskin founding its own chain, region lost, computer
+  faction, actions off); the stores harness row block; 18 mutants, all caught after one plan mutant
+  was rewritten (it was a syntax error); preview `mr_found.png` looked at twice.
+- **Deployed to `data/`** (md5 `1f0e0351` / `8af79564` / `094a16cf`), byte-compared, file lists
+  unchanged. The previous build is in `Modding Files/Backup/resource_overhaul_20261010_founding/`.
+- **To measure in game** (plan task 1, in order): M1 does `add_building_to_settlement` place a chain
+  the slot's template does not permit, and WHEN it appears (same call / later call / next turn /
+  never; the charge rule assumes the same call, and a later one makes every Found click and computer
+  build free, plan task 1 step 2); never: the route is dead, pull the row; M3 does it produce;
+  M5 does it survive a save and load (either no: stop); M2 does CA's browser offer its upgrade (no:
+  `FOUND_UPGRADE = True`, rebuild); M4 what `slot:type()` returns for an empty secondary slot (set
+  `FOUND_SLOT_TYPE`, rebuild); M6 does dismantling work. Then a real Found click, and the AI building
+  one.
+
+### 35a. Measured in game, 2026-10-10 (plan task 1)
+
+A throwaway Immortal Empires campaign as Karl Franz, loaded with only `derpy_resource_overhaul.pack`
+and `wh3_mcp_server.pack` (`derpy_founding_test_mods.txt` in the game folder, launched as
+`Warhammer3.exe derpy_founding_test_mods.txt;` - UNQUOTED: the quoted form loads no mods at all).
+Darkhold transferred to the player by script; every read through the wh3 bridge.
+
+- **M1 - NO for the spec's call.** `cm:add_building_to_settlement("..._darkhold",
+  "derpy_mr_bld_dragon_bone_emp_1")` placed nothing: not in the same call, not in a later call, not
+  after End Turn. **Control:** the same call on The Bone Gulch, whose template
+  (`wh_dlc15_special_plain_of_bones_darkhold_secondary`) permits the chain, placed it IN THE SAME
+  CALL. So the call is synchronous and honours the slot template. The spec's route is dead.
+- **The route that works: `cm:instantly_upgrade_building_in_region(slot, "<chain>_1")` on an
+  empty, active secondary slot.** On Darkhold's slot 1 it placed the building in the same call.
+  CA does the same thing in `episode_vermintide.lua` (`slot_list():item_at(1)` given an endgame
+  building).
+- **M3 - yes (on that route).** Darkhold's dragon bone store read 10 after one End Turn.
+- **M2 - no, by proxy.** With Darkhold raised to settlement level 2, CA's own rule
+  (`add_building_to_settlement(..., "_emp_2")`) refused the upgrade. At The Bone Gulch, at level 2,
+  the same call upgraded it. So CA's building browser should not offer the founded building's
+  upgrade: our row must (`FOUND_UPGRADE = True`). `instantly_upgrade_building_in_region` to `_2`
+  worked on Darkhold. The browser itself was not looked at: the bridge cannot read it.
+- **M4:** `slot:type()` is `"secondary"` for every secondary slot (`FOUND_SLOT_TYPE = "secondary"`).
+  The primary is `"primary"`.
+- **M5 - yes.** Saved (`derpy_founding_test`), quit to menu, Continue: Darkhold still held
+  `derpy_mr_bld_dragon_bone_emp_2` on a level 2 settlement (the save that loaded was ours, not the
+  turn's autosave, which predates the upgrade).
+- **M6 - not measured** (dismantling from CA's browser needs the UI by hand). No design change
+  rides on it.
+- **The deployed build fails safely.** `DERPY_MR_FLOWS.request(me, "found", "..._tor_sethai")` in
+  game: nothing built, gold unchanged (9648). No script error from our files in the session.
+- **What it meant for the code (done 2026-10-11, 35b):** `F.found` must place level
+  1 with `instantly_upgrade_building_in_region` on the free secondary slot (`F.found_free` returning
+  that slot, the slot test no longer optional), with `FOUND_UPGRADE = True` and
+  `FOUND_SLOT_TYPE = "secondary"`; and the AI script's `MR_AI.act`, which uses
+  `add_building_to_settlement`, builds nothing in the 43 regions until it takes the same route there.
+  Until then the Found row in `data/` never builds and never charges, and the computer factions'
+  attempts there fail the same way.
+
+### 35b. Switched and retested, 2026-10-11
+
+- **The switch (the author's go, 2026-10-11):** `F.found` places every level with
+  `cm:instantly_upgrade_building_in_region`. Level 1 goes into the slot `F.found_free` returns:
+  active, empty, not working, and `type() == "secondary"`. With no such slot, `found_state` greys the
+  row "slot". `FOUND_UPGRADE` and `FOUND_SLOT_TYPE` are gone from `gen_mr_ui.py` (both measured), so
+  the row offers Upgrade to levels 2 and 3. The AI script's `MR_AI.act` builds level 1 the same way
+  in every region (`MR_AI.free`). Nothing in the pack calls `add_building_to_settlement` any more.
+- **Checked:** both harnesses now model the measured engine: `add_building_to_settlement` records
+  the call and places nothing. New slot cases: an empty primary, a locked slot and one being built in
+  do not count; the AI with no empty slot, or only a locked, busy or port slot, builds nothing.
+  17 new mutants were all caught, each AI one on the assertion aimed at it. The 2026-10-10 list was
+  re-run: 14 caught, plus 4 stale anchors on code that is gone, each re-aimed in the new list.
+- **Built and deployed** to `data/`, main pack only. Four scripts changed: flows and AI, plus the
+  stores script and the hub v5 copy from a parallel session's edit. The IEE and Old World packs
+  matched row for row and were not redeployed. The previous build is in
+  `Modding Files/Backup/resource_overhaul_20261011_founding_switch/`.
+- **Retested in game:** a new Immortal Empires campaign as Karl Franz, with the same private mod
+  list.
+  - Tor Sethai (dragon bone, taken from Caledor): founded by the model's request. Level 1 went
+    into empty secondary slot 2; gold 5000 -> 4000. The row then read "Bone Pickers | Level 1 of 3
+    | 2000 gold | Upgrade". A click on its button upgraded it to `_emp_2`; gold 4000 -> 2000.
+    Level 3 then greyed "gold".
+  - Dragon's Death (taken from The Narj): Found clicked through the panel. Level 1 went into
+    slot 1, the only active secondary; gold 7000 -> 6000. The row became Upgrade, greyed "Needs a
+    level 2 settlement.".
+  - Darkhold, held by the Dark Land Orcs (computer, Greenskins): `MR_AI.act` built
+    `derpy_mr_bld_dragon_bone_grn_1` in the empty secondary slot and charged 1000.
+  - After one turn the stores read 15 (Tor Sethai, level 2), 10 (Dragon's Death) and 10
+    (Darkhold).
+  - **Bridge trap:** the first two `SimulateLClick`s on the button raised no `ComponentLClickUp`
+    at all: a spy on `S.click` saw nothing, and nothing was built or charged. They came in the first
+    minutes after the campaign loaded. The next two, minutes later, reached every listener. The
+    fault was not in our handler; the turn-one intro was probably holding input. `end_turn` also
+    needed `force` while "Building upgrade available" was up.
+- **Not measured:** M6, dismantling from CA's browser.

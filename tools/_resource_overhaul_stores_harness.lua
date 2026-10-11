@@ -370,38 +370,49 @@ local function dump(tag)
     f:close()
 end
 
--- ANOTHER MOD'S CLICK HANDLER THAT THROWS, queued before the first tick as every listener
--- registered at load is (Great Guilds player report, 2026-10-09: "click sound, nothing opens").
--- Straight into CA's queue, not LISTENERS, so fire() below never meets it.
+-- ANOTHER MOD'S CLICK LISTENER WHOSE CONDITION THROWS, queued before the first tick as every
+-- listener registered at load is (Great Guilds player report, 2026-10-09: "click sound, nothing
+-- opens", and again after the first fix). core:event_callback tests every condition before it
+-- calls any callback, unprotected, so this drops the whole click wherever ours sits in core's
+-- queue. Straight into CA's queue, not LISTENERS, so fire() below never meets it.
+-- events.ComponentLClickUp is the engine's list, with core's dispatcher one entry of it.
+events = { ComponentLClickUp = { function(context)
+    local go = {}
+    for _, l in ipairs(core.event_listeners.ComponentLClickUp) do
+        if l.condition == true or l.condition(context) then go[#go + 1] = l end
+    end
+    for _, l in ipairs(go) do l.callback(context) end
+end } }
 core.event_listeners.ComponentLClickUp = core.event_listeners.ComponentLClickUp or {}
 table.insert(core.event_listeners.ComponentLClickUp,
-             { name = "stranger_throws", condition = true,
-               callback = function() error("another mod's click handler") end })
+             { name = "stranger_throws", callback = function() end, condition = function()
+                 if STRANGER_THROWS then error("another mod's click condition") end
+                 return false
+             end })
 
 -- the opener: made at first tick, right of the resource strip and centred on it
 for _, fn in ipairs(FIRST) do fn() end
 
 do
-    -- lib_core's call pass with no protection: in queue order, a throw ends it
-    local ran = {}
-    pcall(function()
-        for _, l in ipairs(core.event_listeners.ComponentLClickUp) do
-            local ctx = { string = "derpy_mr_close" }
-            if l.condition == true or l.condition(ctx) then
-                ran[#ran + 1] = l.name
-                l.callback(ctx)
-            end
-        end
-    end)
-    local reached = false
-    for _, n in ipairs(ran) do if n == "derpy_mr_stores_click" then reached = true end end
-    eq(reached, true, "a throwing click listener queued earlier starves the stores click: ran "
-       .. table.concat(ran, ","))
+    -- the engine's pass, in list order; a throw ends it, the worst case
+    -- then a click the stranger lets through: a copy left in core's queue would run it twice
+    local seen, real = 0, S.click
+    S.click = function() seen = seen + 1 end
+    for _, throws in ipairs({ true, false }) do
+        STRANGER_THROWS, seen = throws, 0
+        pcall(function()
+            for _, fn in ipairs(events.ComponentLClickUp) do fn({ string = "derpy_mr_close" }) end
+        end)
+        eq(seen, 1, "a click reaches the stores click exactly once, stranger throwing: " .. tostring(throws))
+    end
+    S.click = real
 end
 local b = find("derpy_mr_stores_button")
 eq(b ~= false, true, "button made"); eq(b.x, 1454, "right of the strip"); eq(b.y, 2, "centred on it")
 eq(b.visible, true, "shown once placed")
 bar.w = 1100; REPEATS.derpy_mr_follow_bar(); eq(b.x, 1535, "follows the strip's end")
+b.visible = false; REPEATS.derpy_mr_follow_bar()
+eq(b.visible, false, "the follow never re-shows: the hub hides it off the main screen"); b.visible = true
 bar.y = -600; REPEATS.derpy_mr_follow_bar(); eq(b.x, 1535, "a strip sliding away is ignored")
 eq(b.y, 2, "a strip sliding away leaves the button where it was")
 bar.y = -40; REPEATS.derpy_mr_follow_bar(); eq(b.y, 0, "a strip just above the screen clamps the button onto it")
@@ -817,6 +828,7 @@ eq(bulk("import", "allow").visible, false, "nor all-at-once buttons")
 
 -- ---- phase 7: the panel's actions ------------------------------------------------------
 local REQ, PLAN, ORDER_ST, SALE, ACT_ON = {}, {}, {}, nil, true
+local FOUND_ST = {}
 local SUP_ON, SUPPLY_ST, SHIPS_TO, SHIP_N = true, nil, {}, 0
 CAPS, SHIPS = {}, {}
 DERPY_MR_FLOWS = {
@@ -831,6 +843,7 @@ DERPY_MR_FLOWS = {
     request = function(fk, ...) REQ[#REQ + 1] = fk .. "|" .. table.concat({ ... }, "|") end,
     send_plan = function(f, _rk, stem) eq(f:name(), LOCAL, "the local faction's plan"); return PLAN[stem] end,
     order_state = function(_, key) return ORDER_ST[key] end,
+    found_state = function(f, rk) eq(f:name(), LOCAL, "the local faction's founding"); return FOUND_ST[rk] end,
     sale = function() return SALE end,
     series = function() return {}, {} end,
     last = function() return {} end,
@@ -1427,6 +1440,49 @@ SALE = nil; click("derpy_mr_back"); click("derpy_mr_row_1")
 eq(act("derpy_mr_sell").disabled, true, "nothing to sell: greyed")
 eq(act("derpy_mr_sell").tip, "Nothing to sell: your stores of Coal are no more than half full.", "and says why")
 press(act("derpy_mr_sell")); eq(#REQ, 2, "a greyed Sell asks for nothing")
+-- FOUNDING (spec 2026-10-09): a row above the goods of a region no slot offers its rare building in
+;(function()
+    REQ = {}
+    FOUND_ST.reg_a = { good = "dragon_bone", level = 0, next = 1, cost = 1000, tier_need = 1 }
+    click("derpy_mr_tab_goods"); click("derpy_mr_tab_settlements"); click("derpy_mr_row_1")
+    eq(S.focus, "reg_a", "reg_a's drill-down")
+    local names = DERPY_MR_STORES_FOUND.dragon_bone
+    eq(cell(1, 1).text, names[1], "the first row names the building it founds")
+    eq(cell(1, 2).text, "Not built", "not built yet"); eq(cell(1, 4).text, "1000 gold", "CA's price, beside its button")
+    eq(cell(1, 3).text, "", "nothing under Per turn: a price there reads as income")
+    eq(sendb(1).visible, true, "a button"); eq(sendb(1).text, "Found", "labelled Found")
+    eq(sendb(1).disabled, false, "live")
+    eq(string.find(sendb(1).tip, "No building slot in this region normally takes it", 1, true) ~= nil, true,
+       "the tooltip says why it is here")
+    eq(S.data[1].icon, S.icon_of("dragon_bone"), "the good's own icon")
+    eq(S.data[2].stem ~= nil, true, "the goods follow it")
+    dump("found")
+    press(sendb(1)); eq(REQ[1], "fac_a|found|reg_a", "a click founds it")
+    local stem2 = S.data[2].stem
+    local keep_plan = PLAN[stem2]
+    PLAN[stem2] = { from = B, n = 12, got = 10 }
+    click("derpy_mr_back"); click("derpy_mr_row_1")
+    press(sendb(2)); eq(REQ[2], "fac_a|send|" .. stem2 .. "|reg_a", "Send here under it still sends its own good")
+    PLAN[stem2] = keep_plan
+    FOUND_ST.reg_a = { good = "dragon_bone", level = 1, next = 2, cost = 2000, tier_need = 2, why = "tier" }
+    click("derpy_mr_back"); click("derpy_mr_row_1")
+    eq(cell(1, 1).text, names[1], "the building it has"); eq(cell(1, 2).text, "Level 1 of 3", "at its level")
+    eq(sendb(1).text, "Upgrade", "Upgrade after"); eq(sendb(1).disabled, true, "greyed below the tier")
+    eq(sendb(1).tip, "Needs a level 2 settlement.", "says why")
+    local n = #REQ; press(sendb(1)); eq(#REQ, n, "a greyed row asks for nothing")
+    FOUND_ST.reg_a = { good = "dragon_bone", level = 0, next = 1, cost = 1000, tier_need = 1, why = "gold" }
+    click("derpy_mr_back"); click("derpy_mr_row_1"); eq(sendb(1).tip, "Needs 1000 gold.", "short of gold")
+    FOUND_ST.reg_a = { good = "dragon_bone", level = 0, next = 1, cost = 1000, tier_need = 1, why = "slot" }
+    click("derpy_mr_back"); click("derpy_mr_row_1"); eq(sendb(1).tip, "Needs an empty building slot.", "no slot")
+    ACT_ON = false; click("derpy_mr_back"); click("derpy_mr_row_1")
+    eq(S.data[1].found, nil, "actions off: no row"); ACT_ON = true
+    FOUND_ST.reg_a = nil
+    click("derpy_mr_back"); click("derpy_mr_row_1"); eq(S.data[1].found, nil, "nothing to found: no row")
+    eq(#ERRORS, 0, "no panel errors in the founding row: " .. table.concat(ERRORS, "; "))
+    -- back where the Sell tests left the panel, so the switch tests after still look at Coal's drill-down
+    click("derpy_mr_tab_settlements"); click("derpy_mr_tab_goods"); click("derpy_mr_row_1")
+    eq(act("derpy_mr_sell").visible, true, "Coal's drill-down again")
+end)()
 -- the MCT switch, and no flows script: no buttons, no error
 ACT_ON = false; click("derpy_mr_back"); click("derpy_mr_row_1")
 eq(act("derpy_mr_sell").visible, false, "switched off: no Sell")

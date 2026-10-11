@@ -517,6 +517,28 @@ end
 
 -- WHAT THE PANEL SHOWS NOW: a sub-title, five headers, and one table per row (its five cells,
 -- an icon, a tooltip, and what a click on it opens). Pure, so the harness reads it directly.
+-- FOUNDING A RARE BUILDING (spec 2026-10-09): a lore region no building slot offers it in gets one
+-- row above its goods. The flows script decides; this only words it.
+S.FOUND_WHY = { gold = "Needs %s gold.", tier = "Needs a level %d settlement.", slot = "Needs an empty building slot." }
+function S.found_row(fs, rkey)
+    local names, price = DERPY_MR_STORES_FOUND[fs.good], S.num(fs.cost) .. " gold"
+    local tip
+    if fs.level == 0 then
+        tip = "Found " .. names[1] .. " here for " .. price .. ". No building slot in this region normally takes it;"
+              .. " it is built at once."
+    else
+        tip = "Upgrade to " .. names[fs.next] .. " for " .. price .. ". It is built at once."
+    end
+    if fs.why == "gold" then tip = string.format(S.FOUND_WHY.gold, S.num(fs.cost))
+    elseif fs.why == "tier" then tip = string.format(S.FOUND_WHY.tier, fs.tier_need)
+    elseif fs.why == "slot" then tip = S.FOUND_WHY.slot end
+    -- the price in the fourth column, beside its button: under "Per turn" it read as income
+    return { fs.level == 0 and names[1] or names[fs.level],
+             fs.level == 0 and "Not built" or ("Level " .. fs.level .. " of 3"), "", price, "",
+             icon = S.icon_of(fs.good), tip = tip, found = rkey,
+             send = { label = fs.level == 0 and "Found" or "Upgrade", tip = tip, off = fs.why ~= nil } }
+end
+
 function S.view_model(realm)
     local v = { rows = {}, empty = S.NOTHING }
     if S.view == "goods" and S.focus then
@@ -605,6 +627,8 @@ function S.view_model(realm)
         v.title = "Stores of " .. s.name
         v.heads = { "Resource", "Held / Space", "Per turn", "", "" }
         local f = S.actions_on() and S.local_faction()
+        local fs = f and S.ask("found_state", f, s.key)
+        if fs then v.rows[#v.rows + 1] = S.found_row(fs, s.key) end
         for _, d in ipairs(S.settlement_detail(s)) do
             local tip = S.good_tip(d)
             if d.full then tip = S.FULL_TIP end
@@ -2056,6 +2080,10 @@ function S.click_send(component)
         end
         return
     end
+    if rc and rc.found then
+        if not rc.send.off then return S.request("found", rc.found) end
+        return
+    end
     if rc and rc.send and not rc.send.off then return S.request("send", rc.stem, S.focus) end
 end
 
@@ -2152,7 +2180,9 @@ function S.place_button(attempt)
     end
 end
 
--- The strip sizes to its content mid-turn, with no event for it, so the button follows.
+-- The strip sizes to its content mid-turn, with no event for it, so the button follows. It
+-- only MOVES: the hub hides it off the main screen and gives it back, and a re-show here would
+-- fight that hide three times a second.
 function S.follow_bar()
     if not S.placed or S.hubbed() then return end
     local b = find_uicomponent(S.root(), S.BUTTON)
@@ -2161,7 +2191,6 @@ function S.follow_bar()
     if not x then return end
     local ax, ay = b:Position()
     if ax ~= x or ay ~= y then b:MoveTo(x, y) end
-    if not b:Visible() then b:SetVisible(true) end
 end
 
 -- ---- the raid plate: the goods a raid takes, beside CA's raid values above the army --------
@@ -2302,17 +2331,27 @@ function S.plate_poll()
     end
 end
 
--- FIRST IN THE CLICK QUEUE (Great Guilds player report, 2026-10-09: "click sound, nothing
--- opens"). Since 9.1 lib_core calls listeners unprotected, so one mod's ComponentLClickUp
--- handler that throws abandons every listener queued behind it, logging nothing - and this
--- one registers at the first tick, behind every listener registered at load. The body is
--- pcall'd, so being first cannot make this the handler that starves the rest.
+-- OUT OF CORE'S QUEUE ALTOGETHER (Great Guilds player report, 2026-10-09: "click sound,
+-- nothing opens", and again after the first fix). Since 9.0 lib_core calls listeners
+-- unprotected, and core:event_callback tests EVERY listener's condition before it calls any
+-- callback (lib_core.lua 1978-1990): one mod's condition that throws drops the whole click,
+-- so index 1 of core.event_listeners was not first enough. This lifts the listener into
+-- events.ComponentLClickUp, the engine's own list that core's dispatcher is one entry of -
+-- CA's wh2_campaign_traits.lua writes to events.* the same way. Inserted there BEFORE it
+-- leaves core's, so a missing events table leaves it where core put it; the wrapper never
+-- throws into the engine.
 function S.click_first(name)
     pcall(function()
         local list = core.event_listeners.ComponentLClickUp
-        for i = #list, 2, -1 do
-            if list[i].name == name then
-                table.insert(list, 1, table.remove(list, i))
+        for i = #list, 1, -1 do
+            local l = list[i]
+            if l.name == name then
+                table.insert(events.ComponentLClickUp, 1, function(context)
+                    pcall(function()
+                        if l.condition == true or l.condition(context) then l.callback(context) end
+                    end)
+                end)
+                table.remove(list, i)
                 return
             end
         end

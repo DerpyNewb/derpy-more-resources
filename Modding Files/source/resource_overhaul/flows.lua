@@ -1283,7 +1283,7 @@ end
 
 -- THE ONE DOOR. parts = {action, args...}: a trade switch (export|import, stem), or an action
 -- with exactly its own count of parts. Humans only; the actions only with the MCT switch on.
-F.ACTIONS = { send = 3, order = 2, sell = 2, supply = 3, work = 2, upgrade = 3, aim = 3 }
+F.ACTIONS = { send = 3, order = 2, sell = 2, supply = 3, work = 2, upgrade = 3, aim = 3, found = 2 }
 function F.dispatch(fkey, parts)
     if not F.is_human(fkey) then return end
     local a = parts[1]
@@ -1302,6 +1302,7 @@ function F.dispatch(fkey, parts)
     elseif a == "aim" then
         local cqi = tonumber(parts[3])
         if cqi then F.work(f, parts[2], nil, cqi) end
+    elseif a == "found" then F.found(f, parts[2])
     else F.sell(f, parts[2]) end
 end
 
@@ -2046,6 +2047,80 @@ function F.sweep()
             local f = cm:get_faction(buyer)
             if not f or f:is_null_interface() or f:is_dead() then ups[key] = nil end
         end
+    end
+    -- a dead faction's event record and supply switches, kept in the save for nothing
+    for _, book in ipairs({ F.state.events or {}, F.state.supply or {} }) do
+        for fkey in pairs(book) do
+            local f = cm:get_faction(fkey)
+            if not f or f:is_null_interface() or f:is_dead() then book[fkey] = nil end
+        end
+    end
+end
+
+-- ---- FOUNDING A RARE BUILDING where no slot offers it (spec 2026-10-09) ---------------------
+-- A lore region on a slot template other regions share is offered nothing by a slot; the Vault's
+-- settlement view founds the building by script, for CA's gold price, charged only once it stands.
+-- The region's slot holding a level of any race's chain of `good`: slot, level, chain; nil, 0, nil.
+function F.found_slot(region, good)
+    local sl = region:settlement():slot_list()
+    for i = 0, sl:num_items() - 1 do
+        local s = sl:item_at(i)
+        if s:has_building() then
+            local b = s:building():name()
+            for _, ch in pairs(DERPY_MR_FLOWS_FOUND_CHAIN[good]) do
+                local n = string.sub(b, 1, #ch + 1) == ch .. "_" and tonumber(string.sub(b, #ch + 2))
+                if n then return s, n, ch end
+            end
+        end
+    end
+    return nil, 0, nil
+end
+
+-- An empty secondary slot, or nil. Level 1 goes into it with instantly_upgrade_building_in_region,
+-- which ignores the slot template; add_building_to_settlement honours it and places nothing here
+-- (measured 2026-10-10, TRADE_RESOURCES.md 35a).
+function F.found_free(region)
+    local sl = region:settlement():slot_list()
+    for i = 0, sl:num_items() - 1 do
+        local s = sl:item_at(i)
+        if s:active() and not s:has_building() and not s:is_working() and s:type() == "secondary" then
+            return s
+        end
+    end
+    return nil
+end
+
+-- What the drill-down's row shows; nil when there is no row.
+function F.found_state(faction, rkey)
+    local good = DERPY_MR_FLOWS_FOUND[rkey]
+    local chain = good and DERPY_MR_FLOWS_FOUND_CHAIN[good][faction:culture()]
+    local region = chain and F.owned(faction, rkey)
+    if not region then return nil end
+    local slot, level, there = F.found_slot(region, good)
+    if there and there ~= chain then return nil end      -- another race's: CA's own rules
+    if level >= 3 then return nil end      -- CA's browser will not upgrade it here either (35a, M2)
+    local nxt = level + 1
+    local st = { good = good, chain = chain, level = level, next = nxt, slot = slot or F.found_free(region),
+                 cost = DERPY_MR_FLOWS_FOUND_LEVELS.cost[nxt], tier_need = DERPY_MR_FLOWS_FOUND_LEVELS.req[nxt] }
+    local tier = 0
+    pcall(function() tier = region:settlement():primary_slot():building():building_level() end)
+    if faction:treasury() < st.cost then st.why = "gold"
+    elseif tier < st.tier_need then st.why = "tier"
+    elseif not st.slot then st.why = "slot" end
+    return st
+end
+
+-- The request: built, then looked for, and only then charged.
+function F.found(faction, rkey)
+    local st = F.found_state(faction, rkey)
+    if not st or st.why then return end
+    local want = st.chain .. "_" .. st.next
+    cm:instantly_upgrade_building_in_region(st.slot, want)
+    local _s, got = F.found_slot(F.owned(faction, rkey), st.good)
+    if got == st.next then
+        cm:treasury_mod(faction:name(), -st.cost)
+    else
+        F.say(faction:name() .. " could not build " .. want .. " in " .. rkey)
     end
 end
 

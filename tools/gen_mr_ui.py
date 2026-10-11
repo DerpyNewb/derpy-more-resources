@@ -909,6 +909,11 @@ def header():
     lines += ["DERPY_MR_STORES_CARDS = {"]
     lines += ['    %s = {card = "%s", lu = "%s"},' % (u, c, l) for u, (c, l) in sorted(unit_cards().items())]
     lines.append("}")
+    import gen_resource_overhaul as G
+    # FOUNDING: each rare good's three level names, as CA's building browser shows them
+    lines += ["DERPY_MR_STORES_FOUND = {"]
+    lines += ['    %s = {"%s", "%s", "%s"},' % ((g,) + tuple(G.RARE[g]["levels"])) for g in sorted(G.RARE)]
+    lines.append("}")
     return "\n".join(lines) + "\n"
 
 
@@ -994,6 +999,16 @@ def flows_header():
     lines += ["}", "DERPY_MR_FLOWS_ESCORT_OWN = {"]
     lines += ['    {"%s", %d, "%s"},' % u for u in ESCORT_OWN]
     lines += ["}", "DERPY_MR_FLOWS_ESCORT_DROP = {%s}" % ", ".join("%s = true" % u for u in escort_drop())]
+    # FOUNDING A RARE BUILDING where no slot offers it (spec 2026-10-09)
+    found = G.found_map()
+    costs, reqs = G.level_prices()
+    lines += ["DERPY_MR_FLOWS_FOUND = {"]
+    lines += ['    %s = "%s",' % kv for kv in sorted(found.items())]
+    lines += ["}", "DERPY_MR_FLOWS_FOUND_CHAIN = {"]
+    for good in sorted(set(found.values())):
+        lines.append("    %s = {%s}," % (good, ", ".join('%s = "%s"' % (G.CULTURES[r], ch) for r, ch in G.rare_chains(good))))
+    lines += ["}", "DERPY_MR_FLOWS_FOUND_LEVELS = {cost = {%s}, req = {%s}}"
+              % (", ".join(map(str, costs)), ", ".join(map(str, reqs)))]
     lines += ["DERPY_MR_FLOWS_NO_STORES = {%s}" % ", ".join('"%s"' % t for t in NO_STORES),
               "DERPY_MR_FLOWS_BUNDLES = {"]
     lines += ['    %s = "%s",' % (u, k) for u, k, *_r in bundles()]

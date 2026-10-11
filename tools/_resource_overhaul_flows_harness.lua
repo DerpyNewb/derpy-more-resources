@@ -103,6 +103,7 @@ local function faction(name, opts)
         has_effect_bundle = function(_, b) return FBUNDLES[name] ~= nil and FBUNDLES[name][b] ~= nil end,
         treasury = function() return (opts.gold or 100000) + (TREASURY[name] or 0) end,
         subculture = function() return opts.sc or "wh_main_sc_emp_empire" end,
+        culture = function() return opts.culture or "wh_main_emp_empire" end,
         pooled_resource_manager = function()
             return { resource = function(_, k)
                 if not (FPOOL[name] and FPOOL[name][k]) then return NULL end
@@ -1363,6 +1364,13 @@ F.request("dP", "send", "coal", "d6"); local ds = last_ship()
 dP.dead = true; dP.human = false
 TURN = 5302; turn_start(gP)
 eq(ships_of("dP"), 0, "a dead faction's shipment is cleared"); eq(MARKERS[ds.id], nil, "with its marker")
+-- ...and its event and supply records leave the save; a live faction's stay
+F.event_book("dP").at = 5300; F.supply_book("dP", "prov_d", true).materials = true
+F.event_book("gP").at = 5300; F.supply_book("gP", "prov_g", true).materials = true
+TURN = 5303; turn_start(gP)
+eq(F.state.events.dP, nil, "a dead faction's event record goes"); eq(F.state.supply.dP, nil, "and its supply switches")
+eq(F.state.events.gP.at, 5300, "a live faction's event record stays"); eq(F.state.supply.gP.prov_g.materials, true, "and its switches")
+F.state.supply.gP = nil
 
 -- COMPUTER-RUN FACTIONS: a switch goes on with ten turns of its cost in the capital, Supply the
 -- capital always runs, and at most 1 shipment is on the road
@@ -2367,4 +2375,114 @@ turn_start(hum); eq(F.round_cost, counters, "a human's turn start hands the roun
 eq(F.cost.raid, 0, "and starts new ones")
 
 eq(#ERRORS, 0, "script errors: " .. table.concat(ERRORS, "; "))
+
+-- ---- founding a rare building where no slot offers it (spec 2026-10-09) -------------------
+;(function()
+    local BUILT, PLACE_FAILS = {}, false
+    local function fslot(kind, b)
+        local s = { b = b, kind = kind }
+        local i = { __s = s }
+        i.has_building = function() return s.b ~= nil end
+        i.building = function() return { name = function() return s.b end } end
+        i.active = function() return not s.off end
+        i.is_working = function() return s.busy == true end
+        i.type = function() return s.kind end
+        return i
+    end
+    local SEC = "secondary"
+    -- the engine as measured on these regions (TRADE_RESOURCES.md 35a): the slot template does not
+    -- offer the chain, so add_building_to_settlement places nothing, while
+    -- instantly_upgrade_building_in_region puts it into the slot it is handed
+    cm.add_building_to_settlement = function(_, rk, b) BUILT[#BUILT + 1] = rk .. "|" .. b end
+    cm.instantly_upgrade_building_in_region = function(_, slot, b)
+        BUILT[#BUILT + 1] = "up|" .. b
+        if not PLACE_FAILS then slot.__s.b = b end
+    end
+    local DH = "wh3_main_combi_region_darkhold"
+    local fP = faction("fP", { human = true, culture = "wh_main_emp_empire" })
+    local dh = region(DH, 40000, 0, 400, {}); own(fP, dh, true)
+    dh.slots = { fslot("primary", "wh_main_emp_settlement_minor_1"), fslot(SEC), fslot(SEC) }
+    eq(DERPY_MR_FLOWS_FOUND[DH], "dragon_bone", "Darkhold founds dragon bone")
+    local st = F.found_state(fP.iface, DH)
+    eq(st and st.good, "dragon_bone", "a held listed region has something to found")
+    eq(st.level, 0, "nothing built yet"); eq(st.next, 1, "level 1 next"); eq(st.cost, 1000, "at CA's price")
+    eq(st.tier_need, 1, "and CA's tier"); eq(st.why, nil, "and can be done")
+    -- no row: off the list, a culture with no chain, a region not held
+    local xr = region("x_not_listed", 40100, 0, 400, {}); own(fP, xr)
+    eq(F.found_state(fP.iface, "x_not_listed"), nil, "a region off the list: nothing")
+    local BL = next(DERPY_MR_FLOWS_FOUND, nil)
+    while BL and DERPY_MR_FLOWS_FOUND[BL] ~= "black_lotus" do BL = next(DERPY_MR_FLOWS_FOUND, BL) end
+    local bl = region(BL, 40200, 0, 400, {}); own(fP, bl)
+    eq(F.found_state(fP.iface, BL), nil, "the Empire has no black lotus chain: nothing")
+    local fO = faction("fO", { human = true, culture = "wh_main_emp_empire" })
+    eq(F.found_state(fO.iface, DH), nil, "a region it does not hold: nothing")
+    -- FOUND: placed into the empty secondary slot, then charged
+    TREASURY.fP = 0; BUILT = {}
+    F.request("fP", "found", DH)
+    eq(BUILT[1], "up|derpy_mr_bld_dragon_bone_emp_1", "the player's own race's level 1")
+    eq(dh.slots[2].__s.b, "derpy_mr_bld_dragon_bone_emp_1", "into the first empty secondary slot")
+    eq(dh.slots[3].__s.b, nil, "and only that one")
+    eq(TREASURY.fP, -1000, "charged once it is there")
+    -- UPGRADE: CA's browser will not offer it on this template (35a, M2), so the row does
+    st = F.found_state(fP.iface, DH)
+    eq(st.level, 1, "level 1 there"); eq(st.next, 2, "level 2 next"); eq(st.cost, 2000, "its price")
+    eq(st.why, "tier", "a level 1 settlement cannot take it")
+    F.request("fP", "found", DH); eq(#BUILT, 1, "refused: nothing built"); eq(TREASURY.fP, -1000, "nothing charged")
+    dh.level = 2
+    F.request("fP", "found", DH)
+    eq(BUILT[2], "up|derpy_mr_bld_dragon_bone_emp_2", "upgraded in its slot"); eq(TREASURY.fP, -3000, "charged")
+    dh.level = 3; F.request("fP", "found", DH)
+    eq(F.found_state(fP.iface, DH), nil, "level 3: nothing more")
+    -- NOT PLACED: nothing charged, a log line, still offered
+    local dr = region("wh3_dlc20_combi_region_dragons_death", 40300, 0, 400, {}); own(fP, dr)
+    dr.slots = { fslot("primary", "wh_main_emp_settlement_minor_1"), fslot(SEC) }
+    eq(DERPY_MR_FLOWS_FOUND[dr.key], "dragon_bone", "Dragon's Death founds dragon bone")
+    PLACE_FAILS = true; TREASURY.fP = 0; local nerr = #ERRORS
+    F.request("fP", "found", dr.key)
+    eq(TREASURY.fP, 0, "not placed: nothing charged"); eq(#ERRORS, nerr + 1, "and a log line")
+    eq(F.found_state(fP.iface, dr.key) ~= nil, true, "still offered")
+    PLACE_FAILS = false; ERRORS[#ERRORS] = nil
+    -- REFUSED: short of gold, no empty slot
+    local fG = faction("fG", { human = true, culture = "wh_main_emp_empire", gold = 500 })
+    local dd = region("wh3_main_chaos_region_dragons_death", 40400, 0, 400, {}); own(fG, dd)
+    dd.slots = { fslot("primary", "wh_main_emp_settlement_minor_1"), fslot(SEC) }
+    eq(F.found_state(fG.iface, dd.key).why, "gold", "short of gold")
+    BUILT = {}; F.request("fG", "found", dd.key); eq(#BUILT, 0, "short of gold: refused")
+    dr.slots = { fslot("primary", "wh_main_emp_settlement_minor_1"), fslot(SEC, "wh_main_emp_tavern_1") }
+    eq(F.found_state(fP.iface, dr.key).why, "slot", "no empty slot")
+    dr.slots = { fslot("primary"), fslot(SEC), fslot(SEC) }
+    dr.slots[2].__s.off, dr.slots[3].__s.busy = true, true
+    eq(F.found_state(fP.iface, dr.key).why, "slot", "an empty primary, a locked slot and one being built in do not count")
+    -- ANOTHER RACE'S BUILDING OF THE SAME GOOD: the captor is offered no second one
+    local fK = faction("fK", { human = true, culture = "wh_main_grn_greenskins" })
+    lose(fP, dh); own(fK, dh)
+    -- at level 1, so the level-3 rule cannot answer for the guard
+    dh.slots[2].__s.b = "derpy_mr_bld_dragon_bone_emp_1"
+    eq(F.found_state(fK.iface, DH), nil, "another race's building there: nothing to found")
+    -- the faction's own race's chain, whatever its race
+    local WY = next(DERPY_MR_FLOWS_FOUND, nil)
+    while WY and DERPY_MR_FLOWS_FOUND[WY] ~= "wyvern_scales" do WY = next(DERPY_MR_FLOWS_FOUND, WY) end
+    local wy = region(WY, 40600, 0, 400, {}); own(fK, wy)
+    wy.slots = { fslot("primary", "wh_main_grn_settlement_minor_1"), fslot(SEC) }
+    BUILT = {}; F.request("fK", "found", WY)
+    eq(BUILT[1], "up|derpy_mr_bld_wyvern_scales_grn_1", "a Greenskin founds the Greenskin chain")
+    -- LOST BEFORE THE REQUEST RUNS, a computer faction, the actions switch off
+    -- Darkhold emptied first, so the other-race guard cannot answer for the ownership check
+    dh.slots[2].__s.b = nil
+    eq(F.found_state(fK.iface, DH) ~= nil, true, "held and empty: Darkhold could be founded")
+    lose(fK, dh); BUILT = {}
+    F.request("fK", "found", DH); eq(#BUILT, 0, "lost before the request: nothing")
+    local fC = faction("fC", { culture = "wh_main_emp_empire" })
+    local dk = region("wh3_main_combi_region_tor_sethai", 40500, 0, 400, {}); own(fC, dk)
+    dk.slots = { fslot("primary", "wh_main_emp_settlement_minor_1"), fslot(SEC) }
+    eq(F.found_state(fC.iface, dk.key).why, nil, "a computer faction could build there")
+    F.request("fC", "found", dk.key); eq(#BUILT, 0, "a computer faction's request: nothing")
+    dr.slots = { fslot("primary", "wh_main_emp_settlement_minor_1"), fslot(SEC) }
+    eq(F.found_state(fP.iface, dr.key).why, nil, "Dragon's Death could be founded")
+    F.state.rates.actions = false
+    F.request("fP", "found", dr.key); eq(#BUILT, 0, "actions off: refused")
+    F.state.rates.actions = true
+    cm.add_building_to_settlement, cm.instantly_upgrade_building_in_region = nil, nil
+    eq(#ERRORS, 0, "no script errors in founding: " .. table.concat(ERRORS, "; "))
+end)()
 print("harness ok")

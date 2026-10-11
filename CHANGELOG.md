@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-11
+
+- Rare-resource buildings can be founded from the Vault in the 43 lore regions no building slot offers them (Settlements tab, a settlement's stores: Found, then Upgrade).
+- Computer factions build them in those regions too.
+- Records of dead factions are cleared each turn.
+- Vault button hides with the other buttons off the main campaign screen.
+
 ## 2026-10-09 (night)
 
 - Escort battles: shipments travel with an escort sized by cargo and turn, from each race's own army lists.
