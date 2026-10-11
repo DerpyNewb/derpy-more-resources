@@ -512,14 +512,20 @@ SUPPLY = (
       ("wh_main_effect_force_army_campaign_recruitment_cost_artillery", "region_to_force_own", -15)]),
 )
 # SHIPMENTS: Send here and Supply the capital move goods on the map for SHIP_TURNS turns, drawn as
-# a marker an army at war with the owner can seize. CA's own Food Merchant cart, under our row.
+# a marker an army at war with the owner can seize. Our row is CA's Food Merchant marker with its
+# prefab swapped for Cathay's wagon circle: a marker type is the name of a prefabs/campaign/ file
+# (35 of CA's 52 types match one), and food_merchant itself draws Grom's troll, not a cart
+# (seen in game 2026-10-11).
 # A computer-run faction keeps at most SHIP_AI_CAP on the road; Supply the capital ships when the
 # capital holds under SHIP_STAND turns of a switched-on cost, enough for SHIP_AI_ON; a computer
 # switches a supply on at SHIP_AI_ON turns of it. SHIP_NEAR: how close an enemy army must stand at
 # the owner's turn start to seize one; SHIP_SPOT: CA's preferred distance from the settlement.
 SHIP_TURNS, SHIP_AI_CAP, SHIP_STAND, SHIP_AI_ON = 2, 1, 5, 10
 SHIP_RADIUS, SHIP_NEAR, SHIP_SPOT = 2, 3, 3
-SHIP_INFO, SHIP_MARKER = "derpy_mr_shipment", "food_merchant"
+SHIP_INFO, SHIP_MARKER, SHIP_PREFAB = "derpy_mr_shipment", "food_merchant", "cth_caravan_circle"
+# The marker with that prefab draws NOTHING (seen in game 2026-10-11) but still fires AreaEntered;
+# the look is CA's cth_caravan composite scene, added and removed with the marker by flows.lua.
+SHIP_SCENE = "cth_caravan"
 SHIP_NAME = "Shipment"
 SHIP_TIP = ("A shipment of resources on the road between two settlements. An army at war with its "
             "owner can seize it by marching in.")
@@ -2014,19 +2020,23 @@ def build():
 
 
 def _shipments(add, loc):
-    """Phase 5's map marker: CA's Food Merchant cart under our own key, with our name and tooltip."""
+    """Phase 5's map marker: CA's Food Merchant marker under our own key, drawing the wagon circle,
+    with our name and tooltip."""
     donor, = [r for r in db("campaign_interactable_marker_infos_tables")[1] if r["key"] == SHIP_MARKER]
-    add("campaign_interactable_marker_infos_tables", dict(donor, key=SHIP_INFO, marker_type=SHIP_MARKER))
+    add("campaign_interactable_marker_infos_tables", dict(donor, key=SHIP_INFO, marker_type=SHIP_PREFAB))
     loc += [("campaign_interactable_marker_infos_name_" + SHIP_INFO, SHIP_NAME),
             ("campaign_interactable_marker_infos_tooltip_" + SHIP_INFO, SHIP_TIP)]
 
 
 def check_shipments(t, loc):
     """The marker row draws a prefab CA ships, and carries its name and tooltip."""
+    import read_pack_index as rpi
     rows = t["campaign_interactable_marker_infos_tables"][2]
     assert [r["key"] for r in rows] == [SHIP_INFO], rows
-    types = {r["marker_type"] for r in db("campaign_interactable_marker_infos_tables")[1]}
-    assert rows[0]["marker_type"] in types, "no CA marker prefab %s" % rows[0]["marker_type"]
+    prefab = "prefabs/campaign/%s.bmd" % rows[0]["marker_type"]
+    assert prefab in rpi.paths(os.path.join(os.path.dirname(rvd.DB_PACK), "data.pack")), "no CA prefab " + prefab
+    scenes = {r["id"] for r in db("campaign_composite_scenes_tables")[1]}
+    assert SHIP_SCENE in scenes, "no CA composite scene " + SHIP_SCENE
     keys = dict(loc)
     for pre in ("campaign_interactable_marker_infos_name_", "campaign_interactable_marker_infos_tooltip_"):
         assert keys.get(pre + SHIP_INFO), pre + SHIP_INFO
@@ -2139,6 +2149,12 @@ def _dilemmas(add, loc):
                                     override_icon="", generate=False, prioritized=False, event_category="Event",
                                     is_large_dilemma=False))
         loc += [("dilemmas_localised_title_" + k, e["title"]), ("dilemmas_localised_description_" + k, e["text"])]
+        # WITHOUT GEN_TARGET_MODEL THE TEXT'S TARGET TOKENS DRAW BLANK, whatever the script hands
+        # trigger_dilemma_with_targets (seen 2026-10-11: region and faction names both empty; CA's own
+        # Middenland dilemma, which has the row, drew its name). CA's shape, on every dilemma it names a target in.
+        for opt, val in (("GEN_TARGET_MODEL", ""), ("VAR_CHANCE", "100")):
+            add("cdir_events_dilemma_option_junctions_tables", {
+                "dilemma_key": k, "id": work_link_key(k + opt), "option_key": opt, "value": val, "target": "default"})
         for choice, (label, line) in (("FIRST", e["accept"]), ("SECOND", e.get("decline", EVENT_DECLINE))):
             add("cdir_events_dilemma_choice_details_tables",
                 {"choice_key": choice, "dilemma_key": k, "audio_event_hover": "", "audio_choice_vo": ""})
@@ -2183,6 +2199,7 @@ def check_dilemmas(t, loc):
     rows = {r["key"]: r for r in t["dilemmas_tables"][2]}
     choices = t["cdir_events_dilemma_choice_details_tables"][2]
     pays = t["cdir_events_dilemma_payloads_tables"][2]
+    opts = t["cdir_events_dilemma_option_junctions_tables"][2]
     target ={"region": "RegionTargetName", "tribute": "FirstTargetFactionNameWithIcon",
               "arsenal": "CharacterTargetName", "raid": "FirstTargetFactionNameWithIcon"}
     for e in EVENTS:
@@ -2199,7 +2216,12 @@ def check_dilemmas(t, loc):
         assert tokens <= {want}, "%s names %s, the script hands it %s" % (k, tokens, want)
         for c in ("FIRST", "SECOND"):
             assert [p for p in pays if p["dilemma_key"] == k and p["choice_key"] == c], "%s%s draws no line" % (k, c)
+        mine = {(o["option_key"], o["value"]) for o in opts if o["dilemma_key"] == k}
+        assert {("GEN_TARGET_MODEL", ""), ("VAR_CHANCE", "100")} <= mine, "%s: no GEN_TARGET_MODEL, its names draw blank" % k
     assert len(rows) == len(EVENTS)
+    oids = [o["id"] for o in opts]
+    assert len(set(oids)) == len(oids), "two option rows share an id"
+    assert not set(oids) & {r["id"] for r in db("cdir_events_dilemma_option_junctions_tables")[1]}, "an option id CA uses"
     # the lines under the buttons: TEXT_DISPLAY only (the script pays), each with its text and a
     # legal state - anything outside CA's four draws nothing (RITUALS.md) - and an icon CA ships
     import gen_mr_emitter as E
@@ -3271,7 +3293,10 @@ def selftest():
                     lambda t, l: t["campaign_payload_ui_details_tables"][2][0].update(state="text"),
                     lambda t, l: t["campaign_payload_ui_details_tables"][2][0].update(icon="ui/no_such.png"),
                     lambda t, l: t["cdir_events_dilemma_payloads_tables"][2].__setitem__(
-                        slice(None), [p for p in t["cdir_events_dilemma_payloads_tables"][2] if p["choice_key"] != "SECOND"])):
+                        slice(None), [p for p in t["cdir_events_dilemma_payloads_tables"][2] if p["choice_key"] != "SECOND"]),
+                    lambda t, l: t["cdir_events_dilemma_option_junctions_tables"][2].__setitem__(
+                        slice(None), [o for o in t["cdir_events_dilemma_option_junctions_tables"][2]
+                                      if o["option_key"] != "GEN_TARGET_MODEL" or o["dilemma_key"] != "derpy_mr_dil_tribute"])):
         saved = dict(EVENTS[2])
         bad, bloc = build()
         breakit(bad, bloc)

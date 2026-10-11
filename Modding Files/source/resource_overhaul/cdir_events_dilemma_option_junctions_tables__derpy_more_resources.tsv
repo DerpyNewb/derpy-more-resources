@@ -1,0 +1,14 @@
+dilemma_key	id	option_key	value	target
+#cdir_events_dilemma_option_junctions_tables;1;db/cdir_events_dilemma_option_junctions_tables/derpy_more_resources
+derpy_mr_dil_feast	244344206	GEN_TARGET_MODEL		default
+derpy_mr_dil_feast	2035277519	VAR_CHANCE	100	default
+derpy_mr_dil_siege	1207245166	GEN_TARGET_MODEL		default
+derpy_mr_dil_siege	75548984	VAR_CHANCE	100	default
+derpy_mr_dil_tribute	1749989259	GEN_TARGET_MODEL		default
+derpy_mr_dil_tribute	1496945133	VAR_CHANCE	100	default
+derpy_mr_dil_arsenal	199221232	GEN_TARGET_MODEL		default
+derpy_mr_dil_arsenal	1079906709	VAR_CHANCE	100	default
+derpy_mr_dil_restore	1203110172	GEN_TARGET_MODEL		default
+derpy_mr_dil_restore	967512209	VAR_CHANCE	100	default
+derpy_mr_dil_raid	1151612175	GEN_TARGET_MODEL		default
+derpy_mr_dil_raid	467529310	VAR_CHANCE	100	default

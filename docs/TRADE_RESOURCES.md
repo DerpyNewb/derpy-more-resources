@@ -268,7 +268,7 @@ it now flags only areas CA's maps lack, by a rule with no terrain condition, whi
 incense fault it was written for. Goods placed by region name (Nuln, Sartosa, Altdorf...) now
 also name the `cr_oldworld_region_*` keys, the AI script knows 78 Old World rare-good regions,
 and the Map tab draws the Old World's own minimap (2048x2048). Built and deployed to `data/`,
-not yet seen in game.
+still unseen: the Old World map crashed at startup with no derpy pack loaded (36).
 
 **Live check, IEE turn 1 (2026-10-01), over the wh3 bridge.** Both packs load next to IEE, with no
 script errors from them. The `CcoResourceRecord` reads back whole (Salted Fish, barrels, price 10,
@@ -539,7 +539,8 @@ factions instead.
 - **Checked by.** `check_ai()` and `tools/_resource_overhaul_ai_harness.lua`, which run the
   generated script under Lua 5.1. Mutation-tested against four faults: charging without
   verifying, ignoring the region list, skipping the tier check, and acting for a human.
-- **Not yet seen in game.** CA does use `cm:add_building_to_settlement` (corrected 2026-10-08:
+- **Seen in game 2026-10-11 (36):** four computer factions built a rare building in one round.
+  CA does use `cm:add_building_to_settlement` (corrected 2026-10-08:
   `wh3_tol_something_rotten_in_kislev.lua:637-641` adds secondary resource buildings with it, as
   this script does; also `wh3_tol_helpers.lua:33`, `wh3_dlc25_gelt_dilemmas.lua:98`).
   The script logs `derpy_mr_ai:` for every build, upgrade and failure, so the first AI turn in a
@@ -605,8 +606,8 @@ Plan: `superpowers/plans/2026-10-02-resource-overhaul-stores-phase1.md`.
 | Does `maximum_mod` raise a REGION pool's space? | **Yes.** 400 at level 2, 600 at Zharr-Naggrund |
 | Does every owner have the stores? | **Yes.** The player and six AI factions (daemons, Nagash) |
 | Does the CCO read list what fills each store? | **Yes**, with lore gates applied |
-| What happens to stock on capture, raze or abandonment? | Not observed yet |
-| Does a save from before the stores get them? | Not measured yet |
+| What happens to stock on capture, raze or abandonment? | Capture keeps it; raze and abandon drop the pools (36) |
+| Does a save from before the stores get them? | **Yes** (36): a Chaos Dwarf save from turn 2, pools at space 400 |
 
 **A captured building keeps filling.** The Poxmakers of Nurgle filled Pearls and Salted Fish from
 a harbour built by the previous owner. Production already behaves this way, and the stores follow
@@ -660,7 +661,7 @@ Plan: `superpowers/plans/2026-10-02-resource-overhaul-stores-phase2.md`.
 - **Good tooltip:** it shows the description only; "what makes it" is the drill-down.
 - **Sort order:** settlements are listed by name.
 - **Reopening** keeps the tab and drops the drill-down.
-- **Level** is shown as `building_level()` returns it. Not yet measured in game; see below.
+- **Level** is shown as `building_level()` returns it, which is right (measured below).
 
 **In game** (IEE Conclave, turns 1-2, through the bridge and the author's play, 2026-10-02):
 - **Button:** sits in the hub's column. **Speed:** the panel opens in 0.006 s.
@@ -668,7 +669,8 @@ Plan: `superpowers/plans/2026-10-02-resource-overhaul-stores-phase2.md`.
   `list_clip > rows_holder`.
 - **Level is right as returned:** Zharr-Naggrund 3 / 600, The Falls of Doom 2 / 400.
 - **Capture:** a captured settlement keeps its stock. Eagle Eyries held the previous owner's
-  Wyvern Scales (3/200) and keeps filling for the new owner. Raze and abandon are unmeasured.
+  Wyvern Scales (3/200) and keeps filling for the new owner. Raze and abandon drop the region's
+  pools (measured 2026-10-11, section 36).
 - **Two faults, both fixed:**
   - Tab and Back labels went blank on hover, because `SetStateText` writes the current state
     only. The label is now written to hover and standard.
@@ -841,7 +843,7 @@ art, header alignment, bands).
 
 ## 22. Using the stores: upkeep and holding bonuses (phase 4, 2026-10-02)
 
-Built, deployed to `data/`, **not yet seen in game**. Spec: `superpowers/specs/2026-10-02-resource-overhaul-stores-spending-design.md` §2.
+Built, deployed to `data/`, seen in game 2026-10-11 (36). Spec: `superpowers/specs/2026-10-02-resource-overhaul-stores-spending-design.md` §2.
 Plan, with what was measured offline and the rulings: `superpowers/plans/2026-10-02-resource-overhaul-phase4-upkeep.md`.
 
 - **Eating:** at each owner's turn start, `F.upkeep` (in `flows.lua`) runs over every settlement. Each eats
@@ -870,7 +872,7 @@ Plan, with what was measured offline and the rulings: `superpowers/plans/2026-10
 
 ## 23. The Stores panel's actions (phase 7, 2026-10-02)
 
-Built, deployed to `data/`, **not yet seen in game**. Spec §5. Plan, with the offline
+Built, deployed to `data/`, seen in game 2026-10-11 (36). Spec §5. Plan, with the offline
 measurements and the rulings: `superpowers/plans/2026-10-02-resource-overhaul-phase7-actions.md`.
 Built ahead of phase 5, at the user's choice, because phase 5's open questions need the game.
 
@@ -943,10 +945,12 @@ them. A player-only version would need the crash-class UI calls, a caravan panel
   info). Ghorth walking onto it fired `AreaEntered`, area key `derpy_ct_marker_1`, with the
   character's faction, subtype, cqi and position. It fires for the owner's own army too, so the
   listener has to check war.
-- **Look: not confirmed.** `cm:add_scripted_composite_scene_to_logical_position` with CA's
+- **Look: measured 2026-10-11.** `cm:add_scripted_composite_scene_to_logical_position` with CA's
   `cth_caravan` (Cathay's wagon circle, the only caravan scene in `campaign_composite_scenes`)
-  was placed at the same spot with both shroud flags true. Whether it drew, and at what size,
-  is still unanswered.
+  draws: wagons, barrels and torches about a small settlement's footprint, and the engine keeps it
+  in the save (seen after a reload). A marker's own `marker_type` is a `prefabs/campaign/<type>.bmd`
+  name (35 of 52 CA types match one); `cth_caravan_circle` as a marker draws nothing but still
+  fires `AreaEntered`, so the scene is what the player sees.
 - **Not measured:** whether `AreaEntered` fires for AI characters. The design does not depend
   on it: AI interception is a proximity rule at turn start (an enemy army within a few hexes of
   a shipment), and a friendly army next to it escorts it.
@@ -964,8 +968,8 @@ and can rebuild it. The test campaign holds one idle Conclave convoy recruited b
 
 ## 25. Store events (phase 6, part 1, 2026-10-03)
 
-Built, deployed to `data/`, **not yet seen in game**. Spec §4 (spending design). The capture
-option ("Occupy and restore") is part 2 and is not built: it needs the game measured first (below).
+Built, deployed to `data/`, seen in game 2026-10-11 except Siege Stores (36). Spec §4 (spending
+design). The capture option ("Occupy and restore") is part 2, built as a dilemma in section 27.
 
 | Event | Offered when | Spend | Reward |
 |---|---|---|---|
@@ -996,8 +1000,9 @@ option ("Occupy and restore") is part 2 and is not built: it needs the game meas
   failed roll starting the gap, the AI switch, both short-store guards, a garrison or convoy
   counted as an army, a neighbour at war, the bonus reversed, the switch, the pending offer not
   cleared, another dilemma's answer.
-- **To see in game:** each dilemma's picture and text with its target named; the siege bundle
-  stopping siege attrition; the diplomatic bonus's size.
+- **Seen in game 2026-10-11 (36):** each dilemma's picture and text, its target named once the
+  `GEN_TARGET_MODEL` row was added; the diplomatic bonus, +5 a call on the human's side.
+  **Still to see:** the siege bundle stopping siege attrition.
 
 **Seen in game 2026-10-08 (Arsenal, a Dwarf game):** nothing under either button, and the text read
 "'s army". The list under a button is drawn from payload rows only, and these dilemmas had none.
@@ -1007,7 +1012,7 @@ bundle's icon, or `icon` on the event) under the accept button, read off the acc
 "Nothing is spent" under "Keep the stores". `check_dilemmas()` holds every choice to a line, every
 state to CA's four, every icon to CA's packs, and ids unique and clear of CA's; three planted faults
 caught. **The blank name:** `CharacterTargetName` drew empty with the character AND the force handed
-to `trigger_dilemma_with_targets`; cause unproven (CA's Sword of Khaine hands the character alone).
+to `trigger_dilemma_with_targets`. Cause found 2026-10-11 (section 36): no `GEN_TARGET_MODEL` option row.
 The Arsenal no longer uses the token: "Your largest army", which is the army the script picks.
 Deployed to `data/` in `10c0547c` (with section 28).
 
@@ -1022,7 +1027,7 @@ not built blind.
 
 ## 26. Province supplies and shipments (phase 5, 2026-10-03)
 
-Built, deployed to `data/`, **not yet seen in game**. Spec §3 (spending design, the redesign
+Built, deployed to `data/`, seen in game 2026-10-11 (36). Spec §3 (spending design, the redesign
 approved 2026-10-03); plan `superpowers/plans/2026-10-03-resource-overhaul-phase5-supplies.md`.
 Replaces the per-build version of phase 5, which was never built.
 
@@ -1046,7 +1051,13 @@ capital), with "Supply the capital" as the fourth button. Lit when on.
   second turn start after. Send here counts what is already on the road to a store against its
   free space.
 - **On the map:** `cm:add_interactable_campaign_marker(id, "derpy_mr_shipment", x, y, 2, "", "")`,
-  our row over CA's `food_merchant` prefab (Grom's cart), named "Shipment". First turn beside the
+  our row over CA's `cth_caravan_circle` prefab (draws nothing), named "Shipment", and CA's
+  `cth_caravan` composite scene on the same spot facing the destination settlement, not one-shot so
+  it can be removed (`F.mark` / `F.unmark`). **Until 2026-10-11 the marker used `food_merchant`, which
+  draws Grom's troll** (reported from the game); `check_shipments` now holds the prefab to CA's
+  `data.pack` and the scene key to `campaign_composite_scenes`. Seen in game: the scene moves on the
+  leg change and goes on arrival and on a seizure; a shipment from an older save has no scene until
+  its next leg. On leg 2 beside Altdorf the spot sits at the town's foot, half hidden by it. First turn beside the
   sender, second beside the destination, at the spot
   `cm:find_valid_spawn_location_for_character_from_settlement(faction, region, false, true, 3)`
   returns (CA's marker manager places its markers this way); the settlement's own position on
@@ -1080,8 +1091,9 @@ paid (now `F.supply_state` refuses it); Send here said "no other settlement can 
 shipments on the road already filled the store (now it says so); and two tests that could not
 fail (a horde's seizure, a computer-run faction's click). All four fixed test-first.
 
-**To see in game:**
-- the Food Merchant cart drawing at our marker, and its name and tooltip;
+**Seen in game 2026-10-11 (36):** the Food Merchant marker drew Grom's troll, so the cart is now
+CA's `cth_caravan` wagon scene (section 24); a shipment on the road, its Spending tab row and its
+ten escort cards; `AreaEntered` for a player army. **Still to see:**
 - whether `AreaEntered` fires for an AI army (the turn-start rule covers it if not);
 - each bundle's discount in the build and recruit costs, in particular `region_to_force_own` on a
   recruit cost (CA's own building uses `building_to_forces_own_regionwide`);
@@ -1110,7 +1122,8 @@ Empires, IEE, Realm of Chaos), so it waits until the camera jump is seen in game
 
 ## 27. The Map tab and Restore on capture (2026-10-03)
 
-Both built, deployed to `data/`, **not yet seen in game**. With these, every part of the spending
+Both built and deployed to `data/`; the Map tab seen in game 2026-10-03 (27b, 27c), Restore on
+2026-10-11 (36). With these, every part of the spending
 spec is built.
 
 **The Map tab** (the fifth tab; the tabs are now 120 wide to fit before Back):
@@ -1160,9 +1173,10 @@ not wipe a Feast still waiting for its answer. A save from before kept one per f
 mutants, all caught. Three of the phase 6 mutants had gone stale, because the guards they aimed
 at now appear in the new code too; they were narrowed to their own lines.
 
-**To see in game:**
-- the Map tab: dots and labels placed sensibly, a cart on its road, a click flying there;
-- Restore: offered on capture, the buildings repaired, the public order shown.
+**Seen in game:**
+- the Map tab: 27b and 27c; on 2026-10-11 it drew 2 dots, 1 cart and a 6-point road;
+- Restore (36): offered on capture, 100 marble spent and the public order bundle on. The
+  buildings were undamaged, so the repair itself is still unseen.
 
 ### 27b. Seen in game: the tabs in the corner, and CA's map under the Map tab (2026-10-03)
 
@@ -1479,8 +1493,9 @@ then marker; main pack, CA's rows, the Old World submod), nine selftest mutants,
 harness, ten mutants, eight caught, two equivalent (re-running `hold_exports` is idempotent).
 The harness assumes a DB bundle applied over a custom one of the same key does NOT replace it,
 which is unmeasured. Deployed to `data/` (`32e3a7c8`; backup
-`Backup/resource_overhaul_20261008_hold_rows/`). **To see in game:** Stop exports of one good, end
-the turn: it leaves the Trade Forecast and income drops by its value only, with no other good
+`Backup/resource_overhaul_20261008_hold_rows/`). **Seen 2026-10-11 (36):** Stop exports on books put
+the hold bundle on and set `exports_held`; the income was not read. **Still to see:** Stop exports
+of one good, end the turn: it leaves the Trade Forecast and income drops by its value only, with no other good
 appearing; Allow, end the turn, and it returns. Unmeasured: whether a building effect expression
 re-reads the owner's bundles at turn start (it should: CA's ToZ factory seat works the same way).
 
@@ -1519,8 +1534,9 @@ everyone pays, gold to the exporter). Deployed to `data/` (`413927e5`; backup
   made) and the stores harness (row first, both ways, tooltip, no switches, hidden at 0); 7
   mutants: 6 caught, the 7th (the rate-0 early return) only skips the walk and is commented so.
   Preview `mr_trade.png` drawn and read.
-- **To see in game:** the treasury moving at turn start by the row's figures; the Conclave's
-  treasury rising by what you paid; turn-start time with many factions trading.
+- **Seen in game** (below, and 36: paid 10 then 22, received 30): the treasury moving at turn
+  start by the row's figures; the Conclave's treasury rising by what you paid. **Still to see:**
+  turn-start time with many factions trading.
 
 **Seen in game the same afternoon (turn 6): "received 6128".** The duty priced goods with
 `F.price`, the Exchange's market price when it is loaded: salt 818, coal 400, brass 1,930,
@@ -1591,7 +1607,7 @@ B, decided: **duty runs both ways wherever a player is one side**, the rule trad
 the player, and two computer factions pay each other nothing. Two mutants caught; deployed
 `dc14833f` (backup `Backup/resource_overhaul_20261008_duty_both_ways/`).
 
-## 31. The recruitment draw (built 2026-10-08, not yet seen in game)
+## 31. The recruitment draw (built 2026-10-08, seen in game 2026-10-11, 36)
 
 Stage 1 of the Workshop expansion (spec `superpowers/specs/2026-10-08-resource-overhaul-workshop-expansion-design.md`
 section 3, plan `superpowers/plans/2026-10-08-resource-overhaul-recruitment-draw.md`).
@@ -1607,21 +1623,22 @@ section 3, plan `superpowers/plans/2026-10-08-resource-overhaul-recruitment-draw
   treasury. **Tomb Kings and Khorne get no currency**, a deviation from the spec: both are in `NO_STORES`, so they
   never draw.
 - **Workshop units** record one free recruit per purchase (`works.free[unit]`); the next `UnitTrained` of
-  that key is skipped. The army route (`grant_unit_to_character`) records one too, **unmeasured**: if it
-  fires no `UnitTrained`, the next ordinary recruit of that unit goes free.
+  that key is skipped. The army route (`grant_unit_to_character`) records one too, and **that call fires
+  no `UnitTrained`** (measured 2026-10-11), so the booking is never spent and the next ordinary
+  recruit of that unit goes free. Left for the author (36).
 - **Panel:** "Recruits last turn" at the foot of the Spending tab, with the race's line in its tooltip.
-- **Not measured yet (plan Task 0, deferred because the game was shut):** whether `UnitTrained` fires for
-  global recruitment, mercenaries, the computer and `grant_unit_to_character`, and whether
-  `unit_caste()` / `get_unit_custom_battle_cost()` answer on the campaign unit. A failing read is caught by
-  `F.guard` and charges nothing.
+- **Measured 2026-10-11 (36):** `UnitTrained` fires for a player recruit and for the computer (1,203 in
+  one round, 75,456 gold charged, no error); it does NOT fire for `grant_unit_to_character` or
+  `create_force`. `unit_caste()` and `get_unit_custom_battle_cost()` answer: Swordsmen took 4 iron; a
+  shortfall took the last 3 iron and 18 gold. Still unmeasured: global recruitment and mercenaries.
+  A failing read is caught by `F.guard` and charges nothing.
 - Final review fix: the free recruit is booked BEFORE the grant call, so a `UnitTrained` the engine fires inside
-  `grant_unit_to_character` finds it (harness stubs a re-entrant grant). Open: if that call does fire
-  `UnitTrained`, CA's own scripted gifts (custom starts, caravans, Glottkin) are charged as recruits too; the
-  in-game check must include one CA grant. Known and kept: a war machine with an odd base takes one extra
+  `grant_unit_to_character` finds it (harness stubs a re-entrant grant). Measured: that call fires no
+  `UnitTrained`, so CA's own scripted gifts (custom starts, caravans, Glottkin) are not charged as recruits. Known and kept: a war machine with an odd base takes one extra
   good (each half rounds up).
 - 13 + 2 + 4 mutants caught. Deployed `3fe19009` (backup of the build before it: `Backup/resource_overhaul_20261008_recruit_draw/`).
 
-## 32. Named recipes (built 2026-10-08, not yet seen in game)
+## 32. Named recipes (built 2026-10-08, seen in game 2026-10-11, 36)
 
 Stage 2 of the Workshop expansion (plan `superpowers/plans/2026-10-08-resource-overhaul-named-recipes.md`).
 `gen_resource_overhaul.WORK_RECIPES`: 18 works priced in named common goods, drawn by STEM (`rare_pick`),
@@ -1645,7 +1662,7 @@ never by use, so a recipe never spends a good it does not name.
   cells `use1-4`/`pn1-4`), short ones grey and red; every Workshop section folds on a click.
 - 5 + 6 + 8 + 6 + 6 mutants caught. Deployed `e371147d` (backup `Backup/resource_overhaul_20261008_named_recipes/`).
 
-## 33. Rare works deepened, and stage 2's review (built 2026-10-08, not yet seen in game)
+## 33. Rare works deepened, and stage 2's review (built 2026-10-08, seen in game 2026-10-11, 36)
 
 Stage 3 (plan `superpowers/plans/2026-10-08-resource-overhaul-rare-works-deepened.md`): 15 more CA items and
 9 more units on the existing rare pricing, plus Regiments of Renown pools for four races new to the Workshop
@@ -1664,7 +1681,7 @@ only (`lord = true`, `character_type("general")`), since their effects are `gene
 redraws on `CharacterSelected`/`CharacterDeselected` and a click whose selection moved since the draw redraws
 instead of buying for the old army. Deployed `aae632d2` (backup `Backup/resource_overhaul_20261008_rare_works/`).
 
-## 34. Escort battles (built and in `data/` 2026-10-09, not yet seen in game)
+## 34. Escort battles (built and in `data/` 2026-10-09, raid and defence seen in game 2026-10-11, 36)
 
 Spec `superpowers/specs/2026-10-09-resource-overhaul-escort-battles-design.md`, plan
 `superpowers/plans/2026-10-09-resource-overhaul-escort-battles.md`. Taking a shipment's cargo costs a
@@ -1716,10 +1733,11 @@ battle whenever a player is one side; computer against computer is still a free 
 - **Deployed to `data/`** (md5 `cd4b8ab7` / `209d6349` / `1160df9f`), byte-compared; the one file
   added is `ui/derpy_mr_stores_card.twui.xml`, none dropped. The pre-escort build is backed up in
   `Modding Files/Backup/resource_overhaul_20261009_escorts/`.
-- **To see in game** (spec section 9, none measured yet): the defence battle opening at turn start
-  with the player as defender; the winner read correctly both ways; whether spawning the escort fires
-  `UnitTrained`; the retreat lock holding; the escort's general; a raid from `AreaEntered` through the
-  dilemma; the raid dilemma's text and the escort view's cards.
+- **Seen in game 2026-10-11 (36)** (spec section 9): the defence battle opening at turn start with the
+  player as defender; the winner read for a player attacker and a player defender; the retreat lock;
+  the escort's general; the raid dilemma's text and the escort view's ten cards. `create_force` fired
+  no `UnitTrained`. **Still to see:** a raid offered by `AreaEntered` itself (the test called
+  `F.raid_offer`, since no army could reach the marker).
 
 ## 35. Founding rare buildings (built 2026-10-10; switched to the call that works and retested in game 2026-10-11, 35b)
 
@@ -1841,3 +1859,85 @@ Darkhold transferred to the player by script; every read through the wh3 bridge.
     fault was not in our handler; the turn-one intro was probably holding input. `end_turn` also
     needed `force` while "Building upgrade available" was up.
 - **Not measured:** M6, dismantling from CA's browser.
+
+## 36. Seen in game, 2026-10-11
+
+An Empire Immortal Empires campaign, turns 3 to 5, and a Chaos Dwarf save, driven over the wh3
+bridge with the author watching (one auto-resolve was the author's own click).
+
+- **The dilemmas' target names drew blank: fixed.** Every store event, Restore and raid dilemma
+  drew its target token as nothing ("The stores of  overflow", "a shipment of ."). CA's own
+  Middenland confederation dilemma, fired by the same `trigger_dilemma_with_targets` call, drew
+  its faction name. The difference: two `cdir_events_dilemma_option_junctions` rows,
+  `GEN_TARGET_MODEL` and `VAR_CHANCE` 100, which 49 of CA's 50 target-naming dilemmas carry and ours
+  lacked. `_dilemmas` now writes both on all six; `check_dilemmas` requires them, and a planted
+  removal is caught. Deployed, then seen: "The stores of Uzkulak overflow with provisions", "[flag]
+  Bonerattlaz shares a border with you". It was also the 2026-10-08 Arsenal blank (section 25).
+  The bridge's `read_event` shows resolved tokens (CA's dilemma read back with its flag), so a
+  blank there is real.
+- **Store events:** Feast (100 grain from Altdorf, bundle on), Arsenal (50 war materials, taken
+  from the fullest store; every regular unit of the largest army +1 rank, the lord and hero being
+  characters), Tribute (50 luxuries) and a decline (nothing spent, the offer cleared). The cost and
+  reward lines draw under the buttons.
+- **Tribute moves both sides.** `cm:apply_dilemma_diplomatic_bonus`, with its two factions either
+  way round, moved the human's attitude to the neighbour at once (+5 a call); the computer
+  neighbour's moved at its own turn (9.6 to 13.4). The argument order is not a fault.
+- **Shipments:** the leg change moved the wagon scene; a shipment from before the scene arrived
+  and its `F.unmark` raised no error; arrivals booked as moved.
+- **Escort raid (C3):** a Separatists cart (Grunburg to Ubersreik, 108 salt, 6 escorts) offered
+  to Karl Franz. Attack: CA's manager spawned the escort, the battle (auto-resolved, won) seized the
+  cargo to Altdorf as raided (salt 6 to 114), and the cart, its scene, the escort force and CA's
+  manager slot all cleared. An army in muster stance (it takes it when units are granted to it,
+  at no movement) cannot attack: answering Attack does nothing and the cart stays, never a free
+  seizure. The offer came from calling `F.raid_offer` directly: no Empire army could reach that
+  marker, whose tiles by Grunburg's walls refused a teleport. `AreaEntered` itself was seen firing
+  for a player army walking in, after a reload.
+- **Escort defence (C4):** an Empire cart beside a Separatists army at the turn-start step. The
+  escort spawned as an Empire army (7 with its general), the enemy attacked, no retreat button was
+  shown, the escort won (3150 against 2029), the attacker was destroyed and the cart kept its leg.
+  Retreat lock, invasion and fight record cleaned.
+- **Capture panel:** every option draws our preview. Occupy and Loot & Occupy keep the whole store
+  (150 marble, 26 salt at Grunburg); Sack and Raze take half (75, 13).
+- **Restore on capture (C2):** occupying Grunburg with 150 marble offered Restore; accepted, 100
+  marble spent and `derpy_mr_event_restore` on. Its buildings were undamaged, so the repair had
+  nothing to mend.
+- **Raze (C5):** razing Ubersreik sent half of its store to Helmgart as plundered (50 timber, 30
+  salt), from the battle-time snapshot. The razed region's pools are gone afterwards.
+- **Abandon (A3):** `cm:set_region_abandoned` on Grunburg dropped its pools; the store goes with
+  the settlement. No error.
+- **Save and reload (C6):** `F.state` deep-compared with a snapshot kept in the save: no
+  difference (ships, sequence, supply, orders, works, pending, rates).
+- **A save from before the stores (C7):** a Chaos Dwarf campaign saved at turn 2 without the mod,
+  loaded with it: the rates froze, Uzkulak's pools exist (space 400), no script error.
+- **Chaos Dwarfs (C9):** `conv_armaments` turned 20 coal, 20 brimstone and 20 iron into 30
+  armaments (100 to 130), then refused "wait". A Bull Centaur charge (20 goods) found none in the
+  stores and took 10 armaments instead of gold, with the ledger line "The forges took...". "full"
+  cannot happen for armaments (no maximum).
+- **Earlier the same day (turns 1 to 3, Empire):**
+  - **Stores and holding bonuses (22):** Altdorf took 8 books, 6 salted fish and 6 salt, and ate 2
+    salt; `derpy_mr_well_fed` came on. Helmgart read well fed, garrison stocked and comforts all on, and
+    ate 2 grain; Altdorf read well fed only.
+  - **Orders and sales (23):** a Festival spent 200 books, put its bundle on and started its 10-turn
+    wait (5 active). Selling 200 surplus marble at 2 brought 400 gold (6,912 to 7,312).
+  - **Supplies and shipments (26):** Materials on Altdorf at 2 a turn, its bundle on by turn 3 (17
+    glassware, 2 spent a turn). A 90 iron shipment Helmgart to Altdorf with 10 escort units, due turn 4.
+  - **Works (32, 33):** the Demigryph Regiment of Renown into the mercenary pool (0 to 1), the
+    Featherfoe Torc, Rations and Drill (every unit rank 0 to 1, a second buy refused "wait"), the spice
+    trait on Karl Franz, the lasting records bundle, the feathers upgrade's region bundle.
+  - **Recruits (31):** Swordsmen took 4 iron (100 to 96); with 3 iron left, the next took the 3 and 18
+    gold. The Spending tab read "Recruits last turn: 7 resources, 18 gold".
+  - **Exports and duty (28, 29):** Stop exports on books set the hold; a Middenland trade agreement
+    then paid duty 10 and received 30 on turn 2, and paid 22 on turn 3.
+  - **Computer factions (17, 31):** four rare buildings in one round, among them
+    Crag Halls of Findol starwood at
+    Wydrioth, Temple of Skulls black lotus at Mordkin, Karak Vrag wyvern scales at Fulg; 1,203
+    recruits charged 75,456 gold with no error.
+- **Not measured:** the Old World pack (C8): the Old World map crashed at startup in a minimal mod
+  list with no derpy pack in it (`Warhammer3.exe+0x51423F`, twice), so the crash is not ours and the
+  pack is still unseen. Skaven food, Vampire Coast infamy, Dwarf oathgold and the Underdeep scopes
+  (other races' campaigns). Siege Stores.
+- **Left for the author:** the Workshop army route books a free recruit and then grants the unit,
+  but `grant_unit_to_character` fires no `UnitTrained`, so the booking is never spent and the next
+  ordinary recruit of that unit goes free. Computer factions paid about 63 gold a recruit early
+  (1203 units, 75,456 gold in one round) with empty stores. The siege and raid dilemmas use
+  `ui_image = "food_merchant"`, the same Grom art as the troll marker.

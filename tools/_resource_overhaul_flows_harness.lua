@@ -181,6 +181,7 @@ end
 local SAVED, MP, TURN = {}, false, 1
 DILEMMAS, DIPLO, RANKS, ROLLS, ROLL = {}, {}, {}, {}, 100   -- ROLL 100: no computer-run event fires
 MARKERS, SPAWN_FAIL = {}, false
+SCENES = {}
 ITEMS, POOL, RESEARCH, GRANTED = {}, {}, {}, {}   -- the Workshop's grants
 REPAIRED = {}                     -- Restore: the slots cm repaired   -- phase 5: the shipment markers on the map; a spot CA cannot find
 local FIRST, LISTENERS = {}, {}
@@ -266,6 +267,13 @@ cm = {
         MARKERS[id] = { info = info, x = x, y = y, r = r, f = fk, sc = sc }
     end,
     remove_interactable_campaign_marker = function(_, id) MARKERS[id] = nil end,
+    -- the wagon circle drawn over the shipment's marker, which draws nothing itself (2026-10-11)
+    add_scripted_composite_scene_to_logical_position = function(_, name, key, x, y, fx, fy, one_shot, seen, unseen)
+        if SCENES[name] then error("a scene name used twice: " .. name) end
+        if fx == x and fy == y then error("a scene facing its own spot") end
+        SCENES[name] = { key = key, x = x, y = y, one_shot = one_shot, seen = seen, unseen = unseen }
+    end,
+    remove_scripted_composite_scene = function(_, name) SCENES[name] = nil end,
     region_slot_instantly_repair_building = function(_, slot)
         if type(slot) ~= "table" or not slot.has_building then error("repair takes a slot interface") end
         REPAIRED[#REPAIRED + 1] = slot
@@ -1281,13 +1289,19 @@ eq(pc.held.timber, 11, "the capital still pays this turn")
 eq(MARKERS[s5.id].info, SH.info, "drawn as a shipment marker"); eq(MARKERS[s5.id].r, SH.radius, "of its radius")
 eq(MARKERS[s5.id].x, po.x + 1, "beside the sender, where CA finds a spot")
 eq(MARKERS[s5.id].f, "", "any faction can walk into it")
+eq(SCENES[s5.id] ~= nil, true, "a scene drawn over the marker")
+eq(SCENES[s5.id].key, SH.scene, "the wagon circle"); eq(type(SH.scene), "string", "named by the generator")
+eq(SCENES[s5.id].x, MARKERS[s5.id].x, "on the marker's spot"); eq(SCENES[s5.id].one_shot, false, "and removable")
+eq(SCENES[s5.id].seen, true, "seen through thin shroud"); eq(SCENES[s5.id].unseen, false, "not through thick")
 TURN = 4011; turn_start(pP)
 eq(ships_of("pP"), 1, "one already on the road for it: no second")
 eq(MARKERS[s5.id].x, pc.x + 1, "the second turn: beside the capital")
+eq(SCENES[s5.id] and SCENES[s5.id].x, pc.x + 1, "and its wagons with it")
 eq(s5.x, pc.x + 1, "and the shipment is where its marker is"); eq(pc.held.timber, 7, "paid")
 pc.held.timber = 2
 TURN = 4012; turn_start(pP)
 eq(ships_of("pP"), 0, "arrived"); eq(MARKERS[s5.id], nil, "its marker gone")
+eq(SCENES[s5.id], nil, "and its wagons")
 eq(pc.held.timber, 2 + 22 - 4, "it arrives before the turn's payment, which 2 alone could not make")
 eq(F.supply_state(pP.iface, "pc").on.materials, true, "so the supply stays on")
 eq(F.book("pP").now.timber.moved_in, 22, "booked as moved in")
@@ -1331,7 +1345,8 @@ rA.armies = { field(rA, gs.x, gs.y + SH.near, 504) }
 TURN = 5002; turn_start(gP)
 eq(ships_of("gP"), 0, "seized"); eq(g2.held.coal or 0, 0, "it never arrives")
 eq(rr.held.coal, 45, "the captor's nearest settlement gets the cargo")
-eq(MARKERS[gs.id], nil, "the marker goes"); eq(F.state.factions.rA, nil, "a computer keeps no ledger")
+eq(MARKERS[gs.id], nil, "the marker goes"); eq(SCENES[gs.id], nil, "and its wagons")
+eq(F.state.factions.rA, nil, "a computer keeps no ledger")
 rA.armies = {}
 -- SEIZED BY WALKING IN: AreaEntered, an army only, at war only
 g1.held.coal = 50; TURN = 5100; F.request("gP", "send", "coal", "g2"); gs = last_ship()
@@ -1341,6 +1356,7 @@ enter(gs.id, walker(rA, false)); eq(ships_of("gP"), 1, "a hero alone does not se
 enter("someone_elses_marker", walker(rA, true)); eq(ships_of("gP"), 1, "another marker is not ours")
 enter(gs.id, walker(rA, true)); eq(ships_of("gP"), 0, "an army at war seizes it")
 eq(rr.held.coal, 90, "into the captor's settlement"); eq(MARKERS[gs.id], nil, "and the marker goes")
+eq(SCENES[gs.id], nil, "seized: its wagons go")
 -- a captor with no settlement destroys it
 local hB = faction("hB"); war(gP, hB)
 g1.held.coal = 50; F.request("gP", "send", "coal", "g2"); gs = last_ship()
@@ -1364,6 +1380,7 @@ F.request("dP", "send", "coal", "d6"); local ds = last_ship()
 dP.dead = true; dP.human = false
 TURN = 5302; turn_start(gP)
 eq(ships_of("dP"), 0, "a dead faction's shipment is cleared"); eq(MARKERS[ds.id], nil, "with its marker")
+eq(SCENES[ds.id], nil, "and its wagons")
 -- ...and its event and supply records leave the save; a live faction's stay
 F.event_book("dP").at = 5300; F.supply_book("dP", "prov_d", true).materials = true
 F.event_book("gP").at = 5300; F.supply_book("gP", "prov_g", true).materials = true

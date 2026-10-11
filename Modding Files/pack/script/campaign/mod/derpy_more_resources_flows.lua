@@ -104,7 +104,7 @@ DERPY_MR_FLOWS_SUPPLY = {
     arms = {use = "war", bundle = "derpy_mr_supply_arms"},
 }
 DERPY_MR_FLOWS_SUPPLY_ORDER = {"materials", "stable", "arms"}
-DERPY_MR_FLOWS_SHIP = {per = 2, turns = 2, ai_cap = 1, stand = 5, ai_on = 10, radius = 2, near = 3, spot = 3, info = "derpy_mr_shipment"}
+DERPY_MR_FLOWS_SHIP = {per = 2, turns = 2, ai_cap = 1, stand = 5, ai_on = 10, radius = 2, near = 3, spot = 3, info = "derpy_mr_shipment", scene = "cth_caravan"}
 DERPY_MR_FLOWS_RECRUIT = {per = 100, elite = 1200, elite_per = 400, gold_x = 2, factor = "derpy_mr_recruit"}
 DERPY_MR_FLOWS_CASTE = {
     chariot = {{"mounts", 1}},
@@ -2034,9 +2034,24 @@ function F.spot(fkey, region)
     return math.floor(x + 0.5), math.floor(y + 0.5)
 end
 
--- NO FACTION FILTER: any army may walk in; F.on_area decides who seizes.
+-- NO FACTION FILTER: any army may walk in; F.on_area decides who seizes. The marker draws nothing
+-- (its prefab is the wagon circle's, which a marker cannot show; seen 2026-10-11), so CA's cth_caravan
+-- scene is drawn on the same spot, facing the destination. The engine keeps both in the save.
 function F.mark(s)
     cm:add_interactable_campaign_marker(s.id, F.SHIP.info, s.x, s.y, F.SHIP.radius, "", "")
+    local fx, fy = s.x, s.y + 1
+    pcall(function()
+        local st = cm:get_region(s.to):settlement()
+        if st:logical_position_x() ~= s.x or st:logical_position_y() ~= s.y then
+            fx, fy = st:logical_position_x(), st:logical_position_y()
+        end
+    end)
+    cm:add_scripted_composite_scene_to_logical_position(s.id, F.SHIP.scene, s.x, s.y, fx, fy, false, true, false)
+end
+
+function F.unmark(s)
+    cm:remove_interactable_campaign_marker(s.id)
+    cm:remove_scripted_composite_scene(s.id)
 end
 
 -- ---- escort battles (spec 2026-10-09) ------------------------------------------------------
@@ -2274,7 +2289,7 @@ function F.drop(s)
     for i, x in ipairs(list) do
         if x == s then table.remove(list, i) break end
     end
-    cm:remove_interactable_campaign_marker(s.id)
+    F.unmark(s)
 end
 
 -- SEIZED: the cargo goes to the captor's settlement nearest the shipment, as far as it has room;
@@ -2329,7 +2344,7 @@ function F.ship_step(faction, s, turn)
     if turn - s.at >= F.SHIP.turns then
         F.arrive(faction, s)
     elseif turn - s.at >= 1 and s.leg == 1 then
-        cm:remove_interactable_campaign_marker(s.id)
+        F.unmark(s)
         local to = F.owned(faction, s.to) or cm:get_region(s.to)
         if to then s.x, s.y = F.spot(faction:name(), to) end
         s.leg = 2
@@ -2366,7 +2381,7 @@ function F.sweep()
     for i = #list, 1, -1 do
         local f = cm:get_faction(list[i].f)
         if not f or f:is_null_interface() or f:is_dead() then
-            cm:remove_interactable_campaign_marker(list[i].id)
+            F.unmark(list[i])
             table.remove(list, i)
         end
     end

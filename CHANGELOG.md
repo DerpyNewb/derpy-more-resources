@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-11 (later)
+
+- Shipments drawn as a wagon circle, not a troll.
+- Fixed: store event and raid dilemmas left their settlement, faction or army name blank.
+- Docs: in-game test results for stores, events, shipments, escort battles, recruit charges, duty and the Workshop.
+
 ## 2026-10-11
 
 - Rare-resource buildings can be founded from the Vault in the 43 lore regions no building slot offers them (Settlements tab, a settlement's stores: Found, then Upgrade).

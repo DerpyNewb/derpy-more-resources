@@ -979,9 +979,9 @@ def flows_header():
     lines += ['    %s = {use = "%s", bundle = "%s"},' % (k, u, b) for k, u, b, *_r in G.SUPPLY]
     lines += ["}", "DERPY_MR_FLOWS_SUPPLY_ORDER = {%s}" % ", ".join('"%s"' % s[0] for s in G.SUPPLY),
               "DERPY_MR_FLOWS_SHIP = {per = %d, turns = %d, ai_cap = %d, stand = %d, ai_on = %d, radius = %d, "
-              'near = %d, spot = %d, info = "%s"}'
+              'near = %d, spot = %d, info = "%s", scene = "%s"}'
               % (G.SUPPLY_PER, G.SHIP_TURNS, G.SHIP_AI_CAP, G.SHIP_STAND, G.SHIP_AI_ON, G.SHIP_RADIUS,
-                 G.SHIP_NEAR, G.SHIP_SPOT, G.SHIP_INFO)]
+                 G.SHIP_NEAR, G.SHIP_SPOT, G.SHIP_INFO, G.SHIP_SCENE)]
     lines += ['DERPY_MR_FLOWS_RECRUIT = {per = %d, elite = %d, elite_per = %d, gold_x = %d, factor = "derpy_mr_recruit"}'
               % (RECRUIT_PER, RECRUIT_ELITE, RECRUIT_ELITE_PER, RECRUIT_GOLD_X), "DERPY_MR_FLOWS_CASTE = {"]
     lines += ["    %s = {%s}," % (c, ", ".join('{"%s", %g}' % p for p in parts)) for c, parts in sorted(CASTE_DRAW.items())]
