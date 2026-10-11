@@ -806,6 +806,22 @@ do local n_listeners = #LISTENERS
 F.state = { factions = {} }; F.started = false; F.init()
 for i = #LISTENERS, n_listeners + 1, -1 do LISTENERS[i] = nil end end
 eq(F.state.rates and F.state.rates.raid, 40, "the first tick freezes the rates")
+-- TURN OFF RANDOM DILEMMAS: unticked, the game's own generation is never touched (a Tides of Lore
+-- start turns it off itself); ticked, every load turns it off; frozen, so never back on
+do local n_listeners, GEN = #LISTENERS, {}
+local function tick() F.started = false; F.init() end
+cm.toggle_dilemma_generation = function(_, on) GEN[#GEN + 1] = on end
+eq(DERPY_MR_FLOWS_DEFAULTS.random_off, false, "random dilemmas stay on by default")
+F.state = { factions = {} }; tick(); eq(#GEN, 0, "unticked: the first tick leaves them alone")
+opt.random_off.value = true; F.state = { factions = {} }; tick()
+eq(#GEN, 1, "ticked: the first tick turns them off"); eq(GEN[1], false, "off, not on")
+tick(); eq(#GEN, 2, "and again at every load"); eq(GEN[2], false, "off again")
+opt.random_off.value = false; tick()
+eq(GEN[3], false, "frozen: unticking it in a running campaign does not turn them back on")
+MP = true; opt.random_off.value = true; F.state = { factions = {} }; tick()
+eq(#GEN, 3, "multiplayer takes the default and leaves them alone")
+MP = false; opt.random_off.value = false; cm.toggle_dilemma_generation = nil
+for i = #LISTENERS, n_listeners + 1, -1 do LISTENERS[i] = nil end end
 F.state = { factions = {} }; MP = true
 eq(F.rates().raid, 10, "multiplayer takes the defaults"); eq(F.rates().ai, true, "all of them")
 MP = false

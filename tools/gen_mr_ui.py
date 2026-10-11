@@ -100,7 +100,14 @@ ESCORT_SWITCH = ("escort", "Escort battles",
                  "Every shipment travels with an escort of its owner's soldiers. An army that reaches it must "
                  "beat the escort to take the cargo, and you are asked before your army attacks one. Off: an "
                  "army at war takes a shipment without a fight.", True)
-SWITCHES = (AI_SWITCH, UPKEEP_SWITCH, ACTIONS_SWITCH, EVENTS_SWITCH, SUPPLY_SWITCH, RECRUIT_SWITCH, ESCORT_SWITCH)
+# Asked for 2026-10-11, off by default: cm:toggle_dilemma_generation(false), one global switch, so
+# not one dilemma at a time. Scripted dilemmas (the store events, a campaign's story) still fire.
+RANDOM_SWITCH = ("random_off", "Turn off random dilemmas",
+                 "Stops the game's random dilemmas, the ones that come up on their own, for every faction. "
+                 "Dilemmas that a campaign's story or this mod's store events bring still come. Off: they come "
+                 "as usual.", False)
+SWITCHES = (AI_SWITCH, UPKEEP_SWITCH, ACTIONS_SWITCH, EVENTS_SWITCH, SUPPLY_SWITCH, RECRUIT_SWITCH, ESCORT_SWITCH,
+            RANDOM_SWITCH)
 # THE RECRUITMENT DRAW (workshop expansion spec 2026-10-08, section 3): what a recruited unit draws
 # from the stores, by CA's caste (main_units.caste), per RECRUIT_PER gold of its value. Lords,
 # heroes and `generic` draw nothing. check_recruit() holds every key to CA's DB.
@@ -1081,7 +1088,7 @@ def mct_lua():
                   "if IN_CAMPAIGN then o_%s:set_locked(true, LOCK_REASON) end" % k]
     for (k, label, tip, d), section in ((AI_SWITCH, "stores"), (UPKEEP_SWITCH, "using"),
                                         (ACTIONS_SWITCH, "using"), (EVENTS_SWITCH, "using"),
-                                        (SUPPLY_SWITCH, "using"), (RECRUIT_SWITCH, "using"),
+                                        (RANDOM_SWITCH, "using"), (SUPPLY_SWITCH, "using"), (RECRUIT_SWITCH, "using"),
                                         (ESCORT_SWITCH, "using")):
         if k == "upkeep":
             lines += ["", 'm:add_new_section("using", "Using stores")']

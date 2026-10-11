@@ -116,6 +116,13 @@ o_events:set_default_value(true)
 o_events:set_assigned_section("using")
 if IN_CAMPAIGN then o_events:set_locked(true, LOCK_REASON) end
 
+local o_random_off = m:add_new_option("random_off", "checkbox")
+o_random_off:set_text("Turn off random dilemmas")
+o_random_off:set_tooltip_text("Stops the game's random dilemmas, the ones that come up on their own, for every faction. Dilemmas that a campaign's story or this mod's store events bring still come. Off: they come as usual.")
+o_random_off:set_default_value(false)
+o_random_off:set_assigned_section("using")
+if IN_CAMPAIGN then o_random_off:set_locked(true, LOCK_REASON) end
+
 local o_supply = m:add_new_option("supply", "checkbox")
 o_supply:set_text("Province supplies")
 o_supply:set_tooltip_text("A province capital can pay from its stores each turn for Materials on hand, Stable stocked and Arms stocked in every settlement you hold in its province, and can send for resources from the province's other settlements. Off: no province supplies.")

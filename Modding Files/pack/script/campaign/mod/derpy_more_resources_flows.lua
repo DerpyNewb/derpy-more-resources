@@ -15,6 +15,7 @@ DERPY_MR_FLOWS_DEFAULTS = {
     supply = true,
     recruit = true,
     escort = true,
+    random_off = false,
 }
 DERPY_MR_FLOWS_KIND = {
     eat = "eaten",
@@ -439,6 +440,16 @@ end
 function F.freeze_rates()
     F.state.rates = F.rates()
     return F.state.rates
+end
+
+-- "TURN OFF RANDOM DILEMMAS" (MCT, default off): the campaign director's generation is one global
+-- switch. CA sets it only on a new game's first tick (wh3_tol_helpers.lua:6), which suggests the
+-- save keeps it; set at every load anyway, which costs nothing if so. Never turned back ON: the
+-- setting is frozen for the campaign, and a Tides of Lore start turns generation off itself.
+-- Scripted dilemmas still fire with it off: CA's prologue turns it off, then triggers its story
+-- dilemmas (wh3_prologue_kislev_expedition_story_panels.lua:165-208).
+function F.quiet_dilemmas()
+    if F.rates().random_off then cm:toggle_dilemma_generation(false) end
 end
 
 function F.is_human(fkey)
@@ -2655,6 +2666,7 @@ function F.init()
     -- FROZEN AT FIRST TICK: a new campaign fires no FactionTurnStart until turn 1 ends, and MCT
     -- has read the player's settings by now (its LoadingGame callback). A loaded save is frozen.
     F.guard(F.freeze_rates)
+    F.guard(F.quiet_dilemmas)
     core:add_listener("derpy_mr_flows_raid", "CharacterTurnStart", true,
         function(context) F.guard(F.on_character_turn_start, context:character(), "raid") end, true)
     core:add_listener("derpy_mr_flows_occupation", "CharacterPerformsSettlementOccupationDecision", true,

@@ -1941,3 +1941,33 @@ bridge with the author watching (one auto-resolve was the author's own click).
   ordinary recruit of that unit goes free. Computer factions paid about 63 gold a recruit early
   (1203 units, 75,456 gold in one round) with empty stores. The siege and raid dilemmas use
   `ui_image = "food_merchant"`, the same Grom art as the troll marker.
+
+## 37. Turning off the game's random dilemmas (2026-10-11)
+
+Asked for after the in-game sweep: CA's own random dilemmas can cover the same ground as the store
+events (A Noble Feast and Prosperous Harvest beside Feast; Blood Iron, Rare Metal and Hidden Stash
+beside Arsenal; Caravan Raid and Shipping Ledger beside An Enemy Shipment; nothing beside Tribute,
+Siege Stores or Restore). Each is gated to one culture.
+
+- **The switch:** MCT "Turn off random dilemmas" (`random_off`), in Using stores, **default off**.
+  Frozen into the save with the other switches, so it is set when a campaign starts; multiplayer
+  takes the default.
+- **What it does:** `F.quiet_dilemmas` at every first tick calls `cm:toggle_dilemma_generation(false)`
+  when the switch is on. That is CA's one documented switch for the campaign director's dilemma
+  generation, so it is all of them or none: one dilemma at a time would be a DB row per dilemma
+  (`dilemmas_tables.generate` false), which cannot follow an MCT setting.
+- **Why every load:** CA sets it only from `add_first_tick_callback_new`, i.e. a new game
+  (`wh3_tol_helpers.lua:6`, the Tides of Lore starts), which suggests the save keeps it. Setting it
+  again at each load costs nothing if so. It is never turned back ON: the setting cannot change in
+  a running campaign, and a Tides of Lore start turns generation off itself.
+- **Scripted dilemmas still fire:** CA's prologue turns generation off, then fires its story
+  dilemmas with `cm:trigger_dilemma` (`wh3_prologue_kislev_expedition_story_panels.lua:165-208`). The
+  store events are scripted the same way (`trigger_dilemma_with_targets`).
+- **Which are random:** `dilemmas_tables.generate` is true on 243 of CA's 1,167 dilemmas, every one
+  with a `VAR_CHANCE` row; only one of the 243 is named in CA's Lua.
+- **Checked by** the flows harness: unticked, the first tick never calls it; ticked, it is called
+  with false at the first tick and every load; unticking it later changes nothing; multiplayer leaves
+  it alone; the MCT default matches the script's. A mutant without the call fails ("expected 1,
+  got 0").
+- **Not seen in game yet:** that no random dilemma comes with it on, and that the store events still
+  do.

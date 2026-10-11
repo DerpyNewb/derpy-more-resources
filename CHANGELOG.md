@@ -5,6 +5,7 @@
 - Shipments drawn as a wagon circle, not a troll.
 - Fixed: store event and raid dilemmas left their settlement, faction or army name blank.
 - Docs: in-game test results for stores, events, shipments, escort battles, recruit charges, duty and the Workshop.
+- MCT: Turn off random dilemmas switch, default off (the game's own random dilemmas; store events still come).
 
 ## 2026-10-11
 
