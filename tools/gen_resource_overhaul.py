@@ -449,7 +449,7 @@ EVENTS = (
                  "A feast paid for from this settlement's stores: public order and growth are up.",
                  [("wh_main_effect_public_order_events", "region_to_province_own_unseen", 5),
                   ("wh_main_effect_province_growth_events", "region_to_province_own_unseen", 20)])),
-    dict(key="siege", use="provisions", cost=60, where="region", image="food_merchant",
+    dict(key="siege", use="provisions", cost=60, where="region", image="besieged",
          title="Siege Stores", text="%s is under siege, and its stores still hold provisions. Open them "
          "to the garrison and it can hold out without starving." % _RT,
          accept=("Open the stores", "Spend 60 provisions: the garrison suffers no siege attrition for 2 turns."),
@@ -483,7 +483,7 @@ EVENTS = (
     # ESCORT BATTLES (spec 2026-10-09): offered when a player's army walks onto an enemy cart, so not in
     # the turn-start order and keeping no gap. Nothing is spent; FIRST starts the battle (flows.lua
     # F.raid_answer). `use` only picks the cost line's icon: CA's weapon glyph.
-    dict(key="raid", use="war", cost=0, where="ship", image="food_merchant",
+    dict(key="raid", use="war", cost=0, where="ship", image="all/ivory_road",
          title="An Enemy Shipment", text="Your army has caught up with a shipment of "
          "{{CcoCampaignEventDilemma:FirstTargetFactionNameWithIcon}}. Its escort will fight for the cargo.",
          accept=("Attack the escort", "Fight the escort: win and the cargo goes to your nearest settlement."),
@@ -2191,6 +2191,28 @@ def event_lines(e, choice):
 EB_ICONS = "ui/campaign ui/effect_bundles/"
 
 
+@functools.lru_cache(None)
+def eventpic_folders():
+    """Picture name -> the ui/eventpics/ folders (a race's, or "all") CA ships it in."""
+    import read_pack_index as rpi
+    out = collections.defaultdict(set)
+    for p in rpi.paths(os.path.join(os.path.dirname(rvd.DB_PACK), "ui2.pack")):
+        parts = p.replace(chr(92), "/").lower().split("/")
+        if len(parts) == 4 and parts[:2] == ["ui", "eventpics"] and parts[3].endswith(".png"):
+            out[parts[3][:-4]].add(parts[2])
+    return out
+
+
+def eventpic_every_race(image):
+    """A dilemma picture every race sees: pinned to a folder CA ships it in ("all/ivory_road"), or
+    shipped per race as CA's general pictures are (20 to 25 folders). `food_merchant` is in one
+    folder, Greenskins', and drew Grom's troll on every race's dilemma (seen 2026-10-11)."""
+    if "/" in image:
+        folder, name = image.split("/", 1)
+        return folder in eventpic_folders().get(name, ())
+    return len(eventpic_folders().get(image, ())) >= 20
+
+
 def check_dilemmas(t, loc):
     """Each event's dilemma exists with two choices and every loc line; its image is one CA uses;
     its text names only targets the script hands it."""
@@ -2205,6 +2227,7 @@ def check_dilemmas(t, loc):
     for e in EVENTS:
         k = event_dilemma(e["key"])
         assert rows[k]["ui_image"] in images, "no CA dilemma image %s" % rows[k]["ui_image"]
+        assert eventpic_every_race(rows[k]["ui_image"]), "not drawn for every race: %s" % rows[k]["ui_image"]
         assert sorted(c["choice_key"] for c in choices if c["dilemma_key"] == k) == ["FIRST", "SECOND"], k
         for pre in ("dilemmas_localised_title_", "dilemmas_localised_description_"):
             assert keys.get(pre + k), pre + k
@@ -3288,6 +3311,7 @@ def selftest():
         raise SystemExit("selftest: a broken bundle passed check_bundles()")
     for breakit in (lambda t, l: t["cdir_events_dilemma_choice_details_tables"][2].pop(),
                     lambda t, l: t["dilemmas_tables"][2][0].update(ui_image="no_such_image"),
+                    lambda t, l: t["dilemmas_tables"][2][0].update(ui_image="food_merchant"),
                     lambda t, l: l.remove([x for x in l if x[0].startswith("cdir_events_dilemma_choice_details")][0]),
                     lambda t, l: EVENTS[2].update(text=EVENTS[2]["text"] + " {{CcoCampaignEventDilemma:RegionTargetName}}"),
                     lambda t, l: t["campaign_payload_ui_details_tables"][2][0].update(state="text"),

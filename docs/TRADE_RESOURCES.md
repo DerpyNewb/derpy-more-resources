@@ -1589,9 +1589,9 @@ by orders/supplies/events; duty one way with "Other factions use their stores" o
 offered on loot-and-occupy; our Underdeep coal/silver/brimstone rows on `building_to_building_own`
 where CA scopes that building `foreign_building_to_*` (probably makes nothing for trade; look in
 game). AI supply and event books: closed 2026-10-09, a dead faction's are dropped by `F.sweep` at a player's turn start (4 mutants caught, deployed `10fd5951`);
-`derpy_hub_mr.lua:109` says wrappers must be compared by Id, but line 337 compares with `==` and
-works (CA does the same, `lib_help_pages.lua:2592`); the hub is shared by four mods, so its comment
-is left. Deployed `b57c8802` to `data/` (backup `Backup/resource_overhaul_20261008_sweep_fixes/`).
+the hub's `HUB.plate` comment says wrappers must be compared by Id, but `HUB.hover` compares with
+`==` and works (CA does the same, `lib_help_pages.lua:2592`); the hub is shared by four mods and
+the left bar submod, so its comment is left. Deployed `b57c8802` to `data/` (backup `Backup/resource_overhaul_20261008_sweep_fixes/`).
 
 **Decisions the same day (author).** A: a rare good is never bulk - `F.bulk(use)` is the one pick
 every use-wide count and draw goes through (`F.use_total`, `F.draw`, orders, events, the supply
@@ -1622,10 +1622,11 @@ section 3, plan `superpowers/plans/2026-10-08-resource-overhaul-recruitment-draw
   the spend-only factor `derpy_mr_recruit`; then gold at 2x the cheapest good of that line, capped at the
   treasury. **Tomb Kings and Khorne get no currency**, a deviation from the spec: both are in `NO_STORES`, so they
   never draw.
-- **Workshop units** record one free recruit per purchase (`works.free[unit]`); the next `UnitTrained` of
-  that key is skipped. The army route (`grant_unit_to_character`) records one too, and **that call fires
-  no `UnitTrained`** (measured 2026-10-11), so the booking is never spent and the next ordinary
-  recruit of that unit goes free. Left for the author (36).
+- **Workshop units** bought into the mercenary pool record one free recruit per purchase
+  (`works.free[unit]`); the next `UnitTrained` of that key is skipped. The army route
+  (`grant_unit_to_character`, the player's and the computer's) records none since 2026-10-12 (38):
+  **that call fires no `UnitTrained`** (measured 2026-10-11), so a booking there was never spent and
+  made the next ordinary recruit of that unit free.
 - **Panel:** "Recruits last turn" at the foot of the Spending tab, with the race's line in its tooltip.
 - **Measured 2026-10-11 (36):** `UnitTrained` fires for a player recruit and for the computer (1,203 in
   one round, 75,456 gold charged, no error); it does NOT fire for `grant_unit_to_character` or
@@ -1936,11 +1937,9 @@ bridge with the author watching (one auto-resolve was the author's own click).
   list with no derpy pack in it (`Warhammer3.exe+0x51423F`, twice), so the crash is not ours and the
   pack is still unseen. Skaven food, Vampire Coast infamy, Dwarf oathgold and the Underdeep scopes
   (other races' campaigns). Siege Stores.
-- **Left for the author:** the Workshop army route books a free recruit and then grants the unit,
-  but `grant_unit_to_character` fires no `UnitTrained`, so the booking is never spent and the next
-  ordinary recruit of that unit goes free. Computer factions paid about 63 gold a recruit early
-  (1203 units, 75,456 gold in one round) with empty stores. The siege and raid dilemmas use
-  `ui_image = "food_merchant"`, the same Grom art as the troll marker.
+- **Left for the author:** computer factions paid about 63 gold a recruit early (1203 units,
+  75,456 gold in one round) with empty stores. Fixed 2026-10-12 (38): the Workshop army route's
+  never-spent free recruit, and the siege and raid dilemmas' Grom art (`food_merchant`).
 
 ## 37. Turning off the game's random dilemmas (2026-10-11)
 
@@ -1971,3 +1970,25 @@ Siege Stores or Restore). Each is gated to one culture.
   got 0").
 - **Not seen in game yet:** that no random dilemma comes with it on, and that the store events still
   do.
+
+## 38. Two fixes from the in-game sweep (2026-10-12)
+
+- **The Workshop's army route no longer books a free recruit.** `F.work_grant` books one only on the
+  mercenary-pool route, where the unit is recruited later; `F.work_ai` books none. The flows harness's
+  `grant_unit_to_character` stub no longer fires `UnitTrained` inside the call (the measured engine),
+  and asserts both army routes leave no booking and charge the next ordinary recruit. Three mutants
+  (player route books, computer route books, pool route books nothing), all caught. A save from
+  before keeps any booking it already holds: at most one free recruit per earlier army-route purchase.
+  **Still unmeasured:** whether recruiting from the mercenary pool fires `UnitTrained` (31). If it
+  does not, the pool route has the same leak.
+- **Siege Stores and An Enemy Shipment have their own pictures.** CA's event pictures live per race,
+  `ui/eventpics/<race>/<name>.png`, and `food_merchant` exists only under `grn/`, so every race drew
+  Grom's troll. Siege Stores is now `besieged` (20 race folders, each race its own burning town) and
+  the raid `all/ivory_road` (CA's caravan art, pinned to `all/` as CA's own rows do; the marker already
+  draws CA's caravan scene). `check_dilemmas` now also fails a picture that is not drawn for every
+  race (`eventpic_every_race`: pinned to a folder CA ships it in, or in at least 20 race folders), and
+  the selftest plants `food_merchant`, which the old CA-uses-it check let through.
+- **Built and deployed to `data/`** (md5 `26156b30` / `f88527a3` / `2d7cca28`), file lists unchanged.
+  The IEE and Old World packs' byte differences from `Modpacks/` (noted 2026-10-12) were RPFM's
+  per-save table headers: every row decodes identical. Backup:
+  `Modding Files/Backup/resource_overhaul_20261012_free_recruit/`. Not seen in game.

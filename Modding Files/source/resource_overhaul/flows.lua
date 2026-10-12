@@ -961,18 +961,16 @@ end
 function F.work_grant(faction, w, region_key, cqi)
     local fkey = faction:name()
     local wb, turn = F.works_book(fkey), cm:model():turn_number()
-    if w.kind == "unit" then
-        -- ONE FREE RECRUIT per purchase (spec section 3), booked BEFORE the grant: an engine call can
-        -- fire a listener inside itself, and a UnitTrained raised there must already find it.
-        -- UNMEASURED (plan Task 0): if the army route fires no UnitTrained at all, this waives the
-        -- faction's next ordinary recruit of the unit instead; checked in game before release
-        wb.free = wb.free or {}
-        wb.free[w.grant] = (wb.free[w.grant] or 0) + 1
-    end
     if w.kind == "item" then
         cm:add_ancillary_to_faction(faction, w.grant, false)
         wb.items[w.key] = turn
     elseif w.kind == "unit" and F.work_route(faction, w) == "pool" then
+        -- ONE FREE RECRUIT per purchase (spec section 3): the unit is recruited from the pool later,
+        -- and that UnitTrained must not charge it again. The army route books none: measured
+        -- 2026-10-11, grant_unit_to_character fires no UnitTrained, so a booking there was never
+        -- spent and made the faction's next ordinary recruit of the unit free.
+        wb.free = wb.free or {}
+        wb.free[w.grant] = (wb.free[w.grant] or 0) + 1
         -- THE COUNT IS SET, NOT ADDED (measured 2026-10-07: count 1 on a pool of 1 left 1; a second
         -- purchase was paid for and lost). So: what the pool holds now, plus one.
         local now = F.pool_count(faction, w.grant) or (wb.units and wb.units[w.key]) or 0
@@ -1217,10 +1215,7 @@ function F.work_ai(faction)
         if st and st.ok and F.work_reserve(st) then
             F.work_pay(faction, w, st)
             if w.kind == "unit" then
-                -- its free recruit booked first, as F.work_grant does: the grant may fire UnitTrained
-                local wb = F.works_book(faction:name())
-                wb.free = wb.free or {}
-                wb.free[w.grant] = (wb.free[w.grant] or 0) + 1
+                -- no free recruit booked: the grant fires no UnitTrained (F.work_grant)
                 cm:grant_unit_to_character("character_cqi:" .. army:general_character():command_queue_index(), w.grant)
             else
                 F.work_grant(faction, w, region_key)

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-12
+
+- Fixed: a Workshop unit bought straight into an army made the next ordinary recruit of that unit free.
+- Siege Stores and An Enemy Shipment dilemmas: own pictures, not Grom's troll.
+- Shared mod button: hub v6, works with the left bar submod.
+
 ## 2026-10-11 (later)
 
 - Shipments drawn as a wagon circle, not a troll.

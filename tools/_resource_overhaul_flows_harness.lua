@@ -299,8 +299,8 @@ cm = {
     end,
     grant_unit_to_character = function(_, lookup, unit)
         if type(lookup) ~= "string" or type(unit) ~= "string" then error("grant_unit_to_character: bad arguments") end
+        -- fires no UnitTrained (measured 2026-10-11)
         GRANTED[#GRANTED + 1] = { lookup = lookup, unit = unit }
-        if GRANT_HOOK then GRANT_HOOK(unit) end   -- an engine that fires UnitTrained inside the call
     end,
     save_named_value = function(_, k, v) SAVED[k] = copy(v) end,
     load_named_value = function(_, k, d) if SAVED[k] == nil then return d end return copy(SAVED[k]) end,
@@ -2194,16 +2194,14 @@ end)()
     train(wkP); eq(wk1.held.coal, 100, "the Workshop's unit arrives without a second charge")
     eq(wk1.held.gromril, 100, "nor its gromril")
     train(wkP); eq(wk1.held.coal < 100, true, "a second, recruited the usual way, is charged")
-    -- THE ARMY ROUTE, with UnitTrained fired INSIDE grant_unit_to_character (final review, 2026-10-08):
-    -- the free recruit must be on the book before the call, or the unit is charged and a later one is free
+    -- THE ARMY ROUTE: grant_unit_to_character fires no UnitTrained (measured 2026-10-11), so no free
+    -- recruit may be booked, or the next ordinary recruit of the unit goes free
     local waP = faction("waP", { human = true, sc = "wh_main_sc_dwf_dwarfs" })
     local wa1 = region("wa1", 42500, 0, 2000, { coal = 100, gromril = 100 }); own(waP, wa1, true)
     waP.armies = { host(71, { 1, 2, 3 }) }
-    GRANT_HOOK = function() train(waP) end
     F.work_grant(waP.iface, axe, nil)
-    GRANT_HOOK = nil
     eq(#GRANTED > 0 and GRANTED[#GRANTED].lookup, "character_cqi:71", "the army route")
-    eq(wa1.held.coal, 100, "fired inside the grant: not charged")
+    eq(next(F.state.factions.waP.works.free or {}), nil, "no free recruit booked")
     train(waP); eq(wa1.held.coal < 100, true, "and the next ordinary recruit is charged, not free")
     lose(waP, wa1)
     eq(#ERRORS, 0, "no script errors: " .. table.concat(ERRORS, "; "))
@@ -2262,20 +2260,21 @@ end)()
     F.work_ai(aiW.iface)
     eq(aw1.held.grain, 120, "every good held twice over: the Granary is bought")
     eq(FBUNDLES.aiW and FBUNDLES.aiW[gran.bundle], 0, "with its bundle")
-    -- A COMPUTER'S UNIT PURCHASE is not charged again by the recruit draw (stage 1 final review)
+    -- A COMPUTER'S UNIT PURCHASE goes straight into its army: no recruit, so no free recruit booked
     local axe = W.unit_wh_main_dwf_inf_ironbreakers
     local aiD = faction("aiD", { sc = "wh_main_sc_dwf_dwarfs" })
     local ad1 = region("ad1", 42900, 0, 4000, { gromril = 100, iron = 400 }); own(aiD, ad1, true)
     aiD.armies = { host(62, { 1, 2 }) }
-    GRANT_HOOK = function(unit)
-        fire("UnitTrained", { unit = function() return {
-            faction = function() return aiD.iface end, unit_key = function() return unit end,
-            unit_caste = function() return "melee_infantry" end, get_unit_custom_battle_cost = function() return 1300 end } end })
-    end
     F.work_ai(aiD.iface)
-    GRANT_HOOK = nil
     eq(ad1.held.gromril, 100 - axe.rare_n, "a computer pays the Workshop's gromril")
-    eq(ad1.held.iron, 400 - axe.use_n, "and its iron, and nothing for the recruit it hands itself")
+    eq(ad1.held.iron, 400 - axe.use_n, "and its iron")
+    local adb = F.state.factions.aiD
+    eq(next(adb and adb.works and adb.works.free or {}), nil, "and books no free recruit")
+    local bought = GRANTED[#GRANTED].unit
+    fire("UnitTrained", { unit = function() return {
+        faction = function() return aiD.iface end, unit_key = function() return bought end,
+        unit_caste = function() return "melee_infantry" end, get_unit_custom_battle_cost = function() return 1300 end } end })
+    eq(ad1.held.iron < 400 - axe.use_n, true, "so its next ordinary recruit of the unit is charged")
     eq(#ERRORS, 0, "no script errors: " .. table.concat(ERRORS, "; "))
     lose(cvP, cv1); lose(lsP, ls1); lose(aiW, aw1); lose(aiD, ad1)
     F.state.rates, TURN, ROLL = rates0, turn0, 100
