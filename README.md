@@ -1,6 +1,6 @@
 # Derpy Resource Overhaul
 
-A campaign mod for **Total War: WARHAMMER III**. It adds 37 new trade goods to the
+A campaign mod for **Total War: WARHAMMER III**. It adds 41 new trade goods to the
 campaign map. They are made by the buildings the lore says would make them, only where the
 lore puts them, and they trade through CA's own trade agreements like the vanilla goods.
 
@@ -19,9 +19,10 @@ Until 2026-10-02 this mod was called Derpy More Resources. Its packs are now
 `derpy_resource_overhaul_oldworld.pack`. Every in-game key is
 unchanged, and so are the DB table file names inside the packs.
 
-**Status:** not on the Steam Workshop yet. Tested in an Immortal Empires Expanded campaign
-through a live connection to the running game. A Salted Fish surplus traded in a vanilla
-trade agreement, and the rare buildings were offered to the right races.
+**Status:** not on the Steam Workshop yet. Tested in Immortal Empires and Immortal Empires
+Expanded campaigns through a live connection to the running game, most recently on
+2026-10-23 with twenty trade partners. Not yet tested: the Old World and Realm of Chaos
+campaigns with the trade roads, and multiplayer on two machines.
 
 ## The goods
 
@@ -29,18 +30,19 @@ Salted Fish, Whale Oil, Sea Dragon Hide, Rum, Amber, Grain, Warhorses, Pipeweed,
 Oil, Silk, Tea, Jade, Coal, Silver, Gromril, Quicksilver, Brimstone, Brass, Blackpowder,
 Ithilmar, Dragon Bone, Lustrian Plumes, Black Lotus, Incense, Salted Meat, Arabyan Carpets,
 Kvas, Rhinox Hides, Mead, Glassware, Wool, Porcelain, Pearls, Starwood, Griffon and Pegasus
-Feathers, Wyvern Scales.
+Feathers, Wyvern Scales, and since 2026-10-21 Hardtack, Leather, Cloth and Tools.
 
 Each good comes from one or more kinds of building:
 
 - **Ports:** fish, whale oil, amber, rum, pearls, sea dragon hide
 - **Farms:** grain, wool, olive oil, pipeweed, mead, tea
-- **Hunting lodges:** plumes, rhinox hides, salted meat
-- **Craft houses:** silk, jade, carpets, glassware, porcelain
-- **Forges:** brass
+- **Hunting lodges:** plumes, rhinox hides, salted meat, leather
+- **Craft houses:** silk, jade, carpets, glassware, porcelain, cloth
+- **Forges and metalworks:** brass, tools
 - **Mines:** silver, gromril, quicksilver, coal, brimstone, ithilmar, blackpowder saltpetre
 - **Inns, teahouses, stables and eyries:** kvas, tea, warhorses, feathers
 - **A few cities, by name:** Nuln's blackpowder, the great libraries' books
+- **No building:** hardtack is baked from stored grain and salt
 
 The buildings were chosen by their in-game names and descriptions, not by category: the
 Kislev Roadhouse, which "sells nothing but kvas", makes Kvas, and the Cathay Tea Parlour makes
@@ -66,6 +68,32 @@ without a start position there is no other way to tie a building to a place.
 
 There are 27 building chains, one per race per good. The game files a chain under exactly one
 building set, so one chain shared between races appears for only one of them.
+
+## Stores and the Resource Vault
+
+Every settlement keeps its own store of each good, up to 200 to 1,000 by settlement level.
+Buildings fill it, and settlements eat from it: food, building materials and luxuries keep
+their province's bonuses going. Raids, sacks and razes take from it. Trade partners send their
+surplus to each other's capitals, and each pays the other an import duty in gold.
+
+The Resource Vault is the mod's panel, opened from the campaign HUD. From it you set what each
+settlement keeps and imports, send goods between your settlements by cart, run recurring
+orders and paid contracts, sell surplus, and spend goods in the Workshop on items, units and
+lasting upgrades. Recipes turn stored goods into others, and province services spend goods for
+bonuses. Armies can carry food and go hungry without it. Computer factions play by the same
+rules and pay the same prices. `docs/RESOURCE_OVERHAUL_MECHANICS.md` has every rule and number.
+
+## Trade roads on the map
+
+Every trade agreement, contract and shipment is drawn on the 3D campaign map as a dashed road
+in its owner's colour. The road is a search over the installed map's own pathfinding grid, so it
+goes round mountains, crosses water where ships can, and keeps off land hostile to either side.
+An agreement whose road is longer than the trade reach, or that enemy land cuts off, moves no
+goods and no duty. Nearby roads join into shared corridors.
+
+Low-detail carts and boats drive the roads, in the supplier's own style, each with an icon of
+the good it carries. They are decoration: the goods move on the turn, not with the carts, and
+the carts show only what the economy will really send. They are drawn in single player only.
 
 ## Other mods
 
@@ -97,7 +125,15 @@ py tools/gen_resource_overhaul.py --check      # build and verify, write nothing
 py tools/gen_resource_overhaul.py --selftest
 py tools/gen_resource_overhaul.py --audit      # what each building makes, by its in-game name
 py tools/gen_resource_overhaul.py --pack       # build the .pack files (RPFM's MCP server open)
+py tools/gen_mr_ui.py --selftest              # the Vault, the flows and the roads, under Lua 5.1
 ```
+
+The trade roads need two more steps. `tools/build_mr_terrain_routes.py` reads every campaign
+map's pathfinding grid from your install (`tools/campaign_route_paths.py`) and writes the road
+script from `Modding Files/source/resource_overhaul/terrain_routes.lua`. The cart, boat and
+icon scenes are written by `Modding Files/source/resource_overhaul/cart_scene_builder`, a
+.NET program that compiles TheAssetEditor's ESF reader from the path in its project file; it
+starts from a donor scene that is not published here.
 
 `Modding Files/reference/resource_overhaul_building_audit.md` is the `--audit` output: every
 building that makes a good, by its in-game name per level, beside what it makes.
@@ -113,6 +149,8 @@ Nothing of Games Workshop's or Creative Assembly's is published here:
 
 - no icons;
 - no copy of `city_info_bar.twui.xml`;
+- no composite scenes (`.csc`), vehicle models or road textures;
+- no built road script: it carries each campaign map's pathfinding grid, which is CA's data;
 - none of the seven tables whose rows are CA's rows cloned with a new key (`resources`,
   `resources_to_campaign_junctions`, `cai_personality_strategic_resource_values`, `effects`,
   `building_chains`, `building_levels`, `building_culture_variants`).
@@ -138,6 +176,9 @@ checks every build before writing it:
 - **Map mods.** A guard fails any condition with no terrain clause that blankets a whole area
   of ten or more regions that CA's maps lack (IEE's Ind, Khuresh, Nippon). Every chain a map
   mod's own port, settlement or mine slots permit must be CA's or have rows in its pack.
+- **Lua harnesses.** `gen_mr_ui.py --selftest` runs the shipped Vault, flows and road scripts
+  under Lua 5.1 against stubbed game objects, then 60 mutants, each a plausible mistake in the
+  economy, the provisions, the contracts or the map, and fails if any one survives.
 - **Selftest cases.** The selftest breaks each of these on purpose (an ungated row, a second
   building set, a foreign bonus, a blanket condition) and confirms the check catches it.
 

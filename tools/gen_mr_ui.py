@@ -51,13 +51,19 @@ RATES = (
      "Razing a settlement carries off this share of every resource it keeps before it burns. "
      "0 turns this off.", 0, 100, 50),
     ("trade", "Trade share per turn",
-     "Each turn, every trade agreement sends this share of a resource from the sender's fullest store "
-     "to the partner's capital, for each resource the partner lacks. 0 turns this off.", 0, 25, 5),
+     "Each turn, trade partners receive this share of removable surplus toward their capital import targets. "
+     "Keep reserves and cargo already on the road are respected. 0 turns this off.", 0, 25, 5),
     # IMPORT DUTY (spec 2026-10-08): gold, paid to the partner, never more than the payer holds
     ("duty", "Import duty",
      "Each turn, every faction pays each trade partner this share of the value of what that partner's "
      "settlements made that turn, at the value trade agreements put on it. The gold goes to the partner. "
      "0 turns this off.", 0, 50, 10),
+    # TRADE REACH (author, 2026-10-22): 40 hexes a turn (flows.lua F.ROAD_PER_TURN). No 0 = any distance:
+    # a cut-off pair's search explores everything within reach, and an unbounded one the whole map.
+    ("reach", "Trade reach in turns",
+     "Trade agreements move resources and import duty only while the road between the two capitals takes no "
+     "more than this many turns and keeps out of lands at war with, or very unfriendly to, either side. "
+     "The Trade tab lists the partners cut off and why.", 1, 10, 6),
     # PHASE 5: shipments are drawn on the map, so their number is held down
     ("ships", "Shipments on the road",
      "How many shipments of yours can be on the road at once. Sending a resource between your settlements "
@@ -106,7 +112,13 @@ RANDOM_SWITCH = ("random_off", "Turn off random dilemmas",
                  "Stops the game's random dilemmas, the ones that come up on their own, for every faction. "
                  "Dilemmas that a campaign's story or this mod's store events bring still come. Off: they come "
                  "as usual.", False)
-SWITCHES = (AI_SWITCH, UPKEEP_SWITCH, ACTIONS_SWITCH, EVENTS_SWITCH, SUPPLY_SWITCH, RECRUIT_SWITCH, ESCORT_SWITCH,
+PROCESSING_SWITCH = ("processing", "Additional processing batches",
+    "Allow local workshops to spend stored inputs on extra batches. Passive production is unchanged. Enable individual recipes in a settlement's Stores view.", True)
+SERVICES_SWITCH = ("services", "Sustained services",
+    "Allow optional province services paid each turn with named goods. Enable them in the province capital's Stores view.", True)
+PROVISIONS_SWITCH = ("army_provisions", "Carried army provisions",
+    "Armies eat carried provisions once each turn and refill locally above settlement Keep. Five turns target, ten turns capacity. At sea or without settlements, Load can buy two meals at 10 gold per ration once per turn; human Auto never buys. Foreign land still prevents local refill. Consecutive shortages reduce movement and replenishment. On by default for new campaigns; existing campaign switches stay saved.", True)
+SWITCHES = (PROVISIONS_SWITCH, PROCESSING_SWITCH, SERVICES_SWITCH, AI_SWITCH, UPKEEP_SWITCH, ACTIONS_SWITCH, EVENTS_SWITCH, SUPPLY_SWITCH, RECRUIT_SWITCH, ESCORT_SWITCH,
             RANDOM_SWITCH)
 # THE RECRUITMENT DRAW (workshop expansion spec 2026-10-08, section 3): what a recruited unit draws
 # from the stores, by CA's caste (main_units.caste), per RECRUIT_PER gold of its value. Lords,
@@ -140,10 +152,10 @@ CURRENCY = {
 # THE FIVE USES (spending spec section 1): every store has exactly one; check_uses() asserts it.
 USES = {
     "provisions": ("grain", "salted_fish", "salted_meat", "olive_oil", "tea", "kvas", "mead", "rum", "beer",
-                   "wine", "spices", "salt", "medicine"),
-    "building": ("timber", "marble", "pottery", "glassware", "starwood"),
+                   "wine", "spices", "salt", "medicine", "hardtack"),
+    "building": ("timber", "marble", "pottery", "glassware", "starwood", "cloth", "tools"),
     "war": ("iron", "coal", "brass", "blackpowder", "brimstone", "gromril", "ithilmar", "quicksilver",
-            "obsidian", "whale_oil"),
+            "obsidian", "whale_oil", "leather"),
     "mounts": ("warhorses", "feathers", "rhinox_hides", "wyvern_scales", "dragon_bone", "sea_dragon_hide",
                "animals", "tusks", "furs"),
     "luxuries": ("silk", "jade", "carpets", "porcelain", "pearls", "amber", "lustrian_plumes", "incense",
@@ -162,7 +174,7 @@ WORK_SOUND = {"item": "UI_CLICK_Craft_Item", "unit": "UI_CAM_DWF_BookOfGrudges_P
 # (gen_resource_overhaul.EXCLUDE); check_uses() asserts the two lists agree.
 NO_STORES = ("dae", "kho", "nur", "sla", "tze", "tmb", "nag", "bst")
 # Which factor each kind of move books to: the junction is derpy_mr_store_<stem>_<kind>.
-FLOW_KIND = {"raid": "raided", "sack": "plundered", "raze": "plundered", "trade": "traded", "eat": "eaten",
+FLOW_KIND = {"process": "processed", "raid": "raided", "sack": "plundered", "raze": "plundered", "trade": "traded", "eat": "eaten",
              "move": "moved", "spend": "spent", "sell": "sold"}
 # PHASE 7: gold a unit when the Zharr Exchange is not there to price it (spending spec section 5)
 SELL_RATE = {"provisions": 1, "building": 2, "war": 3, "mounts": 4, "luxuries": 5}
@@ -212,10 +224,11 @@ L = {
     "tab_workshop": (600, 56, 112, 26),
     # THE MAP TAB: the list's own box, a pad inside it, and no picture of the map - it is framed on
     # the dots it draws, so it fits any campaign. A capital's dot is larger and named; a convoy is
-    # CA's convoy icon on MAP_STEPS dots from where it left to where it goes. MAP_MIN_SPAN keeps one
-    # lone settlement from being blown up to fill the box.
-    "map": (20, 142, 820, 448), "MAP_PAD": 24, "MAP_DOT": 20, "MAP_CAP": 26, "MAP_PATH": 4,
-    "MAP_STEPS": 6, "MAP_CART_SIZE": 28, "MAP_MIN_SPAN": 40, "map_label": (160, 16),
+    # CA's convoy icon. The roads are the 3D map's (terrain_routes.lua), in its palette's MAP_PATH_COLOURS
+    # colours (four a colour set, the player's MCT choice), at most MAP_PATH_MAX dots, each MAP_PATH across with its 1px dark rim. MAP_MIN_SPAN
+    # keeps one lone settlement from being blown up to fill the box.
+    "map": (20, 142, 820, 448), "MAP_PAD": 24, "MAP_DOT": 20, "MAP_CAP": 26, "MAP_PATH": 6,
+    "MAP_PATH_MAX": 400, "MAP_PATH_COLOURS": 16, "MAP_CART_SIZE": 28, "MAP_MIN_SPAN": 40, "map_label": (160, 16),
     # ON CA'S MINIMAP (one pixel to one logical unit): never closer than MAP_ART_ZOOM, past which
     # the picture is a blur. MAP_CHAR_W is a name's width per letter at 11px, for spacing names.
     "MAP_ART_ZOOM": 2, "MAP_CHAR_W": 6.5,
@@ -289,6 +302,7 @@ L = {
                   (596, 204, "left")),
         "settlements": ((36, 230, "left"), (276, 46, "right"), (330, 90, "left"), (430, 80, "right"),
                         (520, 280, "right")),
+        "trade_focus": ((36, 240, "left"), (286, 150, "left"), (446, 90, "centre"), (546, 130, "centre"), (686, 114, "centre")),
         "trade": ((36, 230, "left"), (276, 60, "right"), (346, 90, "centre"), (446, 90, "centre"),
                   (546, 254, "left")),
         # the Spending tab: a capital's four supply boxes in 2-5; a shipment's from, to and turn in
@@ -483,6 +497,9 @@ def build_row():
             r.add(E.C("derpy_mr_supic_" + k, L["icon"][2], L["icon"][3], interactive=True, image=ICON_BG))
     r.add(_cell(E, "derpy_mr_sendhere", L["send"][0], L["send"][1], interactive=True, image=BTN_BG,
                 hover=[_flat(BTN_HOVER)], sound=SND_SMALL, align="Center", size=12))
+    for action, width in (("minus", 90), ("auto", 130), ("plus", 114)):
+        r.add(_cell(E, "derpy_mr_policy_" + action, width, L["send"][1], interactive=True, image=BTN_BG,
+                    hover=[_flat(BTN_HOVER)], sound=SND_SMALL, align="Center", size=12))
     E.assign(root, "MR02")
     return E.layout(root, "derpy: one row of the Stores panel, created per row into rows_holder. "
                     "Generated by tools/gen_mr_ui.py; do not hand-edit.")
@@ -584,7 +601,6 @@ def build_bar():
 
 
 MAP_DOT_COLOUR = "#E0553CFF"     # a settlement: red ink, read on CA's parchment and on black alike
-MAP_PATH_COLOUR = "#E0553CCC"    # the dotted road, the settlements' red, a little fainter
 MAP_ART_DIM = "#8C8C8CFF"        # CA's parchment, dimmed so the panel's beige names read on it
 ROUND_SMALL = "ui/skins/default/button_round_small_%s.png"   # the Close button's art
 MAP_KEY_ICON = {"cap": L["MAP_CAP_ICON"], "town": L["MAP_TOWN_ICON"], "cart": L["MAP_CART"]}
@@ -617,14 +633,25 @@ def build_mapcart():
                     "tools/gen_mr_ui.py; do not hand-edit.")
 
 
-def build_mappath():
-    """One dot of a convoy's road on the Map tab."""
+def build_mappath(n):
+    """One dot of a trade road on the Map tab, in the 3D map's colour n, a little fainter.
+
+    THE DARK RIM: measured 2026-10-21 on the dimmed IE minimap, the red and blue inks alone are
+    2.5:1 and 3.2:1 against its median parchment, under the 3:1 a mark needs. A 1px black rim
+    reads on parchment and the ink reads on the rim, whatever the colour."""
     import gen_mr_emitter as E
-    root = E.C("root", L["MAP_PATH"], L["MAP_PATH"])
-    root.add(E.C("derpy_mr_stores_mappath", L["MAP_PATH"], L["MAP_PATH"], image=WHITE,
-                 colour_img=MAP_PATH_COLOUR))
-    E.assign(root, "MR09")
-    return E.layout(root, "derpy: one dot of a convoy's road on the Stores panel's Map tab. Generated "
+    import build_mr_terrain_routes as T
+    # R.ink hands out set * 4 + R.colour (`% 4`): one template per palette colour, or one draws nothing, silently
+    src = (T.OUT / "terrain_routes.lua").read_text(encoding="utf-8")
+    assert re.search(r"function R\.colour.*?% (\d+)", src, re.S).group(1) == str(len(T.COLOUR_SETS[0][3])) == "4"
+    assert len(T.COLOURS) == L["MAP_PATH_COLOURS"] <= 16, T.COLOURS   # 16: one hex digit of the GUID prefix
+    ink = "#%02X%02X%02XCC" % tuple(round(255 * v) for v in T.COLOURS[n])
+    s = L["MAP_PATH"]
+    root = E.C("root", s, s)
+    root.add(E.C("derpy_mr_stores_mappath_%d" % n, s, s, layers=[
+        _flat(WHITE, colour="#000000CC"), _flat(WHITE, colour=ink, offset=(1, 1), dw=-2, dh=-2)]))
+    E.assign(root, "MR9%X" % n)
+    return E.layout(root, "derpy: one dot of a trade road on the Stores panel's Map tab. Generated "
                     "by tools/gen_mr_ui.py; do not hand-edit.")
 
 
@@ -686,8 +713,9 @@ BUILDERS = (("derpy_mr_stores_panel", build_panel), ("derpy_mr_stores_row", buil
             ("derpy_mr_stores_button", build_button), ("derpy_mr_stores_list", build_list),
             ("derpy_mr_stores_sp", build_sp), ("derpy_mr_stores_bar", build_bar),
             ("derpy_mr_stores_mapdot", build_mapdot), ("derpy_mr_stores_mapcart", build_mapcart),
-            ("derpy_mr_stores_mappath", build_mappath), ("derpy_mr_stores_maplabel", build_maplabel),
-            ("derpy_mr_stores_mapart", build_mapart), ("derpy_mr_stores_card", build_card))
+            ("derpy_mr_stores_maplabel", build_maplabel),
+            ("derpy_mr_stores_mapart", build_mapart), ("derpy_mr_stores_card", build_card)) + tuple(
+            ("derpy_mr_stores_mappath_%d" % n, functools.partial(build_mappath, n)) for n in range(L["MAP_PATH_COLOURS"]))
 
 
 def goods():
@@ -969,7 +997,7 @@ def flows_header():
     lines += ['    {stem = "%s", res = "%s", use = "%s", rare = %s, value = %g},'
               % (s, r, use_of(s), _rare(s), worth[r] * CA_UNIT_VALUE) for s, r, _i in goods()]
     import gen_resource_overhaul as G
-    lines += ["}", "DERPY_MR_FLOWS_ORDERS = {"]
+    lines += ["}", "DERPY_MR_FLOWS_ECONOMY = %s" % _lua(G.economy_definitions()), "DERPY_MR_FLOWS_ORDERS = {"]
     lines += ['    %s = {use = "%s", bundle = "%s"},' % (k, u, b) for k, u, b, *_r in G.ORDERS]
     lines += ["}", "DERPY_MR_FLOWS_ORDER = {%d, %d, %d}   -- cost, turns, cooldown"
               % (G.ORDER_COST, G.ORDER_TURNS, G.ORDER_COOLDOWN),
@@ -1050,11 +1078,30 @@ def flows_lua():
 MCT_TITLE = "Derpy Resource Overhaul"
 MCT_DESC = ("How goods move between settlement stores. These are fixed for the life of a campaign: "
             "change them from the main menu before starting a new one. In a multiplayer campaign "
-            "they are ignored and every value is the default on every machine.")
+            "they are ignored and every value is the default on every machine. The trade route lines "
+            "can be changed at any time.")
 
 
 # Shown on a greyed setting in a campaign: the values are frozen into the save (flows.lua).
 MCT_LOCK = "Fixed when a campaign starts. Change it from the main menu before starting a new one."
+
+# THE ROUTE LINES (author, 2026-10-22): how the campaign map draws trade routes. Neither locked nor frozen:
+# they move no goods, so a campaign takes a new choice at the next redraw (terrain_routes.lua R.style).
+# Values and their order: build_mr_terrain_routes.SIZES and COLOUR_SETS, which the scenes are built from.
+ROUTE_OPTIONS = (
+    ("route_size", "Line size", "How big the dashes of the trade route lines on the campaign map are. "
+     "A change shows within a few seconds, in a campaign too.", "SIZES", "small"),
+    ("route_colours", "Line colours", "The four colours of the trade route lines on the campaign map. Each "
+     "faction's routes keep one of the four, so you can tell whose they are. A change shows within a few "
+     "seconds, in a campaign too.", "COLOUR_SETS", "default"),
+)
+ROUTE_SWITCHES = (
+    ('agreements', 'Trade agreements', 'Show agreement roads permitted by the resource import and export switches.'),
+    ('contracts', 'Standing contracts', 'Show roads for enabled standing contracts.'),
+    ('shipments', 'Travelling shipments', 'Show roads and markers for cargo already dispatched. Stopping future trade does not recall it.'),
+    ('carts', 'Moving carts and boats', 'Show decorative minecarts on land and transport boats at sea. This does not change deliveries.'),
+    ('icons', 'Resource icons above traffic', 'Show an available resource permitted by the trade switches. Shipment and contract vehicles show their assigned resource. Empty returns have no icon.'),
+)
 
 
 def mct_lua():
@@ -1086,7 +1133,8 @@ def mct_lua():
                   "o_%s:set_default_value(%d)" % (k, d),
                   'o_%s:set_assigned_section("stores")' % k,
                   "if IN_CAMPAIGN then o_%s:set_locked(true, LOCK_REASON) end" % k]
-    for (k, label, tip, d), section in ((AI_SWITCH, "stores"), (UPKEEP_SWITCH, "using"),
+    for (k, label, tip, d), section in ((PROVISIONS_SWITCH, "using"), (PROCESSING_SWITCH, "using"), (SERVICES_SWITCH, "using"),
+                                        (AI_SWITCH, "stores"), (UPKEEP_SWITCH, "using"),
                                         (ACTIONS_SWITCH, "using"), (EVENTS_SWITCH, "using"),
                                         (RANDOM_SWITCH, "using"), (SUPPLY_SWITCH, "using"), (RECRUIT_SWITCH, "using"),
                                         (ESCORT_SWITCH, "using")):
@@ -1099,6 +1147,24 @@ def mct_lua():
                   "o_%s:set_default_value(%s)" % (k, "true" if d else "false"),
                   'o_%s:set_assigned_section("%s")' % (k, section),
                   "if IN_CAMPAIGN then o_%s:set_locked(true, LOCK_REASON) end" % k]
+    import build_mr_terrain_routes as T
+    lines += ["", 'm:add_new_section("routes", "Trade route lines")']
+    for kind, label, tip in ROUTE_SWITCHES:
+        k='route_'+kind
+        lines += ['', 'local o_%s = m:add_new_option("%s", "checkbox")' % (k,k),
+                  'o_%s:set_text("%s")' % (k,label), 'o_%s:set_tooltip_text("%s")' % (k,tip),
+                  'o_%s:set_default_value(true)' % k, 'o_%s:set_assigned_section("routes")' % k]
+    for k, label, tip, source, default in ROUTE_OPTIONS:
+        values = getattr(T, source)
+        assert default in [v[0] for v in values], (k, default)
+        lines += ["",
+                  'local o_%s = m:add_new_option("%s", "dropdown")' % (k, k),
+                  'o_%s:set_text("%s")' % (k, label),
+                  'o_%s:set_tooltip_text("%s")' % (k, tip),
+                  'o_%s:set_assigned_section("routes")' % k]
+        lines += ['o_%s:add_dropdown_value("%s", "%s", "%s", %s)'
+                  % (k, v[0], v[1], v[2], "true" if v[0] == default else "false") for v in values]
+        lines.append('o_%s:set_default_value("%s")' % (k, default))
     return "\n".join(lines) + "\n"
 
 
@@ -1107,6 +1173,8 @@ def files():
     out[LUA_REL] = stores_lua()
     out[FLOWS_REL] = flows_lua()
     out[MCT_REL] = mct_lua()
+    import build_mr_terrain_routes
+    out[PACK_REL + 'script/campaign/mod/derpy_more_resources_terrain_routes.lua'] = build_mr_terrain_routes.runtime()
     return out
 
 
@@ -1136,13 +1204,18 @@ def pack_paths():
     return [rel[len(PACK_REL):] for rel in files()]
 
 
-def run_harness(harness=HARNESS):
+def run_harness(harness=HARNESS, flows_text=None, stores_text=None):
     """A harness against the built files, from a temp folder: (returncode, output).
     __SCRIPT__ and __STORES__ are the stores script, __FLOWS__ the flows script, __MCT__ the MCT
     settings file and __UIDIR__ the folder the .twui.xml files are in."""
     tmp = tempfile.mkdtemp()
     try:
-        for rel, text in files().items():
+        built = files()
+        if flows_text is not None:
+            built[FLOWS_REL] = flows_text
+        if stores_text is not None:
+            built[LUA_REL] = stores_text
+        for rel, text in built.items():
             with io.open(os.path.join(tmp, os.path.basename(rel)), "w", encoding="utf-8",
                          newline="\n") as fh:
                 fh.write(text)
@@ -1160,6 +1233,137 @@ def run_harness(harness=HARNESS):
     finally:
         shutil.rmtree(tmp)
     return got.returncode, got.stdout + got.stderr
+
+
+def check_economy_mutations():
+    subject = flows_lua().replace("\r\n", "\n")
+    mutations = (
+        ("output capacity", "if d.output and F.free(region, d.output[1]) < d.output[2] then", "if false then"),
+        ("complete inputs", "if F.available_stock(v, stem) < n then", "if false then"),
+        ("building health", 'd.levels[b:name()] and b:percent_health() == 100', 'd.levels[b:name()]'),
+        ("province capital", 'if cap:is_null_interface() or cap:name() ~= region:name() then', 'if false then'),
+        ("once per turn", '(not b or b.done ~= turn)', 'true'),
+        ("named keep", 'held - F.FED_TURNS * named,', 'held,'),
+        ("named import target", 'F.SHIP.ai_on * named - held - incoming,', ''),
+        ("exact input debit", 'changes[#changes + 1] = { stem, -n, KIND.spend }',
+         'changes[#changes + 1] = { stem, 0, KIND.spend }'),
+        ("actual output", 'changes[#changes + 1] = { d.output[1], d.output[2], KIND.process }',
+         'changes[#changes + 1] = { d.output[1], 0, KIND.process }'),
+        ("service benefit", 'cm:apply_effect_bundle_to_region(d.bundle, region:name(), F.BUNDLE_TURNS)', 'do end'),
+        ("compensation", 'local delta = before[c[1]] - F.held(region, c[1])', 'local delta = 0'),
+        ("AI budget", 'F.economy_admit(faction, region, d, 2)', 'F.economy_admit(faction, region, d, 1)'),
+        ("AI named output", 'on = (view.held[stem] or 0) + (view.incoming[stem] or 0) < target',
+         'on = F.import_need(view, stem) > 0'),
+        ("campaign switch", 'and F.rates()[kind] and F.economy_open(faction, region, d)',
+         'and F.economy_open(faction, region, d)'),
+        ("capture cleanup", '    F.economy_clear(region)\n    local ups', '    local ups'),
+    )
+    for label, before, after in mutations:
+        assert subject.count(before) == 1, "stale mutation anchor: " + label
+        mutated = subject.replace(before, after, 1)
+        syntax = subprocess.run([LUA_EXE.replace("lua.exe", "luac.exe"), "-p", "-"],
+                                input=mutated, capture_output=True, text=True)
+        assert syntax.returncode == 0, "invalid mutation %s: %s" % (label, syntax.stderr)
+        code, out = run_harness(FLOWS_HARNESS, mutated)
+        assert code != 0 and 'in function' in out and 'syntax' not in out, "survived or invalid: %s\n%s" % (label, out)
+        print("  caught:", label)
+    code, out = run_harness(FLOWS_HARNESS)
+    assert code == 0, out
+    print("economy mutations: %d/%d caught; restored harness passes" % (len(mutations), len(mutations)))
+
+
+def check_provision_mutations():
+    subject = flows_lua().replace("\r\n", "\n")
+    mutations = (
+        ("army AI switch", 'or not (rates.ai or faction:is_human()) then return rows end', 'then return rows end'),
+        ("starter half capacity", 'row.need * 5', 'row.need * 10'),
+        ("starter issue registry", 'if not F.state.army_issued[row.id] then', 'if true then'),
+        ("starter first meal", 'b.done = cm:model():turn_number()', 'b.done = -1'),
+        ("starter food culture", 'biscuit and "hardtack" or "salted_meat"', '"grain"'),
+        ("army duplicate meal", "if b.done ~= turn then", "if true then"),
+        ("army reserve", "math.min(left, F.available_stock(view, g.stem))", "math.min(left, view.held[g.stem] or 0)"),
+        ("army debit", 'unload and n or -n)', 'unload and n or 0)'),
+        ("army transaction factor", 'F.PREFIX .. g.stem .. "_" .. KIND.move, unload', 'F.PREFIX .. g.stem .. "_move", unload'),
+        ("army sea refill", 'if ch:is_at_sea() then return nil, "At sea: no refill" end', ''),
+        ("undead army meals", 'or not F.eats(faction)\n        or not force:has_general()', 'or not F.uses_stores(faction)\n        or not force:has_general()'),
+        ("field purchase stamp", 'b and b.field_turn == cm:model():turn_number()', 'false'),
+        ("field payment confirmation", 'if paid ~= cost then', 'if false then'),
+        ("human auto field spending", 'row.source or not faction:is_human()', 'true'),
+        ("field ration cap", 'row.need * 2 - F.provision_total(b)', 'row.need * 10 - F.provision_total(b)'),
+        ("army siege", 'if r:garrison_residence():is_under_siege() then return nil, "Local settlement is besieged" end', ''),
+        ("army unit need", 'local need = math.max(1, math.ceil(force:unit_list():num_items() / 4))', 'local need = 1'),
+        ("army meal cargo", 'b.goods[g.stem] = b.goods[g.stem] - n', 'b.goods[g.stem] = b.goods[g.stem]'),
+        ("army recovery", 'b.short = left == 0 and 0 or b.short + 1', 'b.short = b.short + 1'),
+        ("army owner identity", 'force:faction():name() ~= b.f', 'false'),
+        ("army unload pauses", 'if op == "unload" then b.auto = false end', 'do end'),
+        ("army garrison exclusion", 'or force:is_armed_citizenry()', ''),
+        ("army demand", 'out.provisions = (out.provisions or 0) + army_need', 'out.provisions = out.provisions or 0'),
+        ("army reserve release", '- F.FED_TURNS * (v.recurring.army_need or 0)', '- 0'),
+        ("army paused demand", 'and (not b or b.auto ~= false) then', 'then'),
+        ("army relief dispatch", 'local ship = F.ship(faction, source.region, dest.region, g.stem, fit.n)', 'local ship = nil'),
+        ("army relief export hold", 'F.stopped(seller:name(), "export", stem)', 'false'),
+        ("army relief import hold", 'F.stopped(fkey, "import", stem) then return nil end', 'false then return nil end'),
+    )
+    for label, before, after in mutations:
+        assert subject.count(before) == 1, "stale provision mutation: " + label
+        changed = subject.replace(before, after, 1)
+        syntax = subprocess.run([LUA_EXE.replace("lua.exe", "luac.exe"), "-p", "-"],
+            input=changed, capture_output=True, text=True)
+        assert syntax.returncode == 0, (label, syntax.stderr)
+        code, out = run_harness(FLOWS_HARNESS, changed)
+        assert code != 0 and "in function" in out and "syntax" not in out, "survived: %s\n%s" % (label, out)
+        print("  caught:", label)
+    code, out = run_harness(FLOWS_HARNESS)
+    assert code == 0, out
+    print("provision mutations: %d/%d caught; restored harness passes" % (len(mutations), len(mutations)))
+
+
+def check_route_mutations():
+    subject = flows_lua().replace("\r\n", "\n")
+    mutations = (
+        ("cart gross limit", 'math.min(n, F.CART_MAX, order and order.batch or F.CART_MAX, F.available_stock(source, stem))', 'math.min(n, order and order.batch or 1000000, F.available_stock(source, stem))'),
+        ("saved arrival due", 'if turn >= F.ship_due(s) then', 'if turn - s.at >= F.SHIP.turns then'),
+        ("recipient incoming", '(s.recipient or s.f) == fkey', '(s.sender or s.f) == fkey'),
+        ("recurring once per turn", 'if o.enabled and o.done ~= turn then', 'if o.enabled then'),
+        ("escrow debit", 'F.route_gold(faction, -escrow)', 'F.route_gold(faction, 0)'),
+        ("checked stock debit", 'not F.route_goods(from, stem, -n)', 'false'),
+        ("paid delivered only", 'math.min(s.escrow, delivered * s.price)', 's.escrow'),
+        ("unpaid refund", 'local refund = s.escrow - pay', 'local refund = 0'),
+        ("escrow settlement once", 'if not s.sender or s.settled then return end', 'if not s.sender then return end'),
+        ("contract cancellation", 'for _, s in ipairs(carts) do F.route_return(s) end', 'do end'),
+        ("dead party money loss", 'and v[3] or "lost"', 'and v[3] or "refunded"'),
+        ("standing route replacement", 'and not F.route_covers(faction, cap:name(), use)', ''),
+    )
+    for label, before, after in mutations:
+        assert subject.count(before) == 1, "stale route mutation: " + label
+        changed = subject.replace(before, after, 1)
+        syntax = subprocess.run([LUA_EXE.replace("lua.exe", "luac.exe"), "-p", "-"],
+            input=changed, capture_output=True, text=True)
+        assert syntax.returncode == 0, (label, syntax.stderr)
+        code, out = run_harness(FLOWS_HARNESS, changed)
+        assert code != 0 and "in function" in out and "syntax" not in out, "survived: %s\n%s" % (label, out)
+        print("  caught:", label)
+    code, out = run_harness(FLOWS_HARNESS)
+    assert code == 0, out
+    print("route mutations: %d/%d caught; restored harness passes" % (len(mutations), len(mutations)))
+
+
+def check_map_road_mutations():
+    """The Map tab's roads (the 3D map's links): each rule broken once, the stores harness must fail."""
+    subject = stores_lua().replace("\r\n", "\n")
+    mutations = (
+        ("framed on the realm", "grow(point[1], point[2], r.own)", "grow(point[1], point[2], true)"),
+        ("surface carries all", "local sx1, sy1 = px(all[3], all[4])", "local sx1, sy1 = px(x1, y1)"),
+        ("dot cap", "if #m.path >= L.MAP_PATH_MAX then break end", ""),
+        ("road colour", 'place("path" .. d.colour,', 'place("path2",'),
+        ("every third point", "if visible[i] and i % 3 == 1 then road[#road + 1]", "if visible[i] then road[#road + 1]"),
+    )
+    for label, before, after in mutations:
+        assert subject.count(before) == 1, "stale map road mutation: " + label
+        code, out = run_harness(HARNESS, stores_text=subject.replace(before, after, 1))
+        assert code != 0 and "harness ok" not in out, "survived: %s\n%s" % (label, out)
+        print("  caught:", label)
+    print("map road mutations: %d/%d caught" % (len(mutations), len(mutations)))
 
 
 def check_layout():
@@ -1322,7 +1526,7 @@ def check_button_faces():
                (L["tab_workshop"], ("Workshop",)),
                (L["back"], ("Back",)),
                (L["bulk"], ["Allow all exports", "Stop all imports", "Sell surplus"] + [o[4] for o in G.ORDERS]),
-               ((0, 0) + L["send"], ("Send here", "Show", "Buy", "Buy here", "Forged", "Built", "Choose"))]
+               ((0, 0) + L["send"], ("Send here", "Show", "Buy", "Buy here", "Forged", "Built", "Choose", "Enable", "Pause"))]
     for (_x, _y, w, h), labels in buttons:
         fw, fh = face(w, h)
         for t in labels:
@@ -1369,7 +1573,7 @@ def check_xml():
             assert s in cats, "%s: a sound CA never uses: %s" % (rel, s)
     with io.open(SRC, encoding="utf-8") as fh:       # art the script swaps in at runtime
         for p in re.findall(r'"(ui/[^"]+\.png)"', fh.read()):
-            assert p in have, "the script names art CA does not ship: %s" % p
+            assert p in have or (p == "ui/skins/default/derpy_mr_provisions.png" and os.path.isfile(os.path.join(ROOT, PACK_REL, *p.split("/")))), "missing runtime art: %s" % p
     for stem, _res, icon in goods():
         assert icon in have or os.path.isfile(os.path.join(ROOT, PACK_REL, *icon.split("/"))), \
             "no icon for %s: %s" % (stem, icon)
@@ -1382,6 +1586,13 @@ def check_xml():
 
 
 def selftest():
+    import build_mr_terrain_routes
+    build_mr_terrain_routes.selftest()
+    route_check = subprocess.run([LUA_EXE, os.path.join(ROOT, 'tools', '_resource_terrain_routes_harness.lua')],
+                                 cwd=ROOT, capture_output=True, text=True)
+    assert route_check.returncode == 0, route_check.stdout + route_check.stderr
+    import test_service_labels
+    test_service_labels.check()
     check_layout()
     check_text_fits()
     check_button_faces()
@@ -1394,7 +1605,7 @@ def selftest():
     import gen_resource_overhaul as G
     g = goods()
     assert [s for s, _r, _i in g] == list(G.store_stems()), "the panel's goods are not the stores"
-    assert len(g) == 54, len(g)
+    assert len(g) == 58, len(g)
     # stale() sees a hand edit, so pack() cannot ship one
     tmp = tempfile.mkdtemp()
     try:
@@ -1409,6 +1620,10 @@ def selftest():
     for h in (HARNESS, FLOWS_HARNESS):
         code, out = run_harness(h)
         assert code == 0 and "harness ok" in out, "%s:\n%s" % (os.path.basename(h), out)
+    check_economy_mutations()
+    check_provision_mutations()
+    check_route_mutations()
+    check_map_road_mutations()
     # the Lua builds derpy_mr_store_<stem>_<kind> from FLOW_KIND; those must be Task 2's junctions
     assert set(FLOW_KIND.values()) == {k for k, _p, _n in G.FLOW_FACTORS}, FLOW_KIND
     assert G.flow_junction("coal", "raided") == "derpy_mr_store_coal_raided"

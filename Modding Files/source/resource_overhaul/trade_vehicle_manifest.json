@@ -1,0 +1,578 @@
+{
+  "land_wood": {
+    "triangles": 54,
+    "vertices": 60,
+    "meshes": 1,
+    "bounds": [
+      -0.2636508345603943,
+      0.013641875237226486,
+      -0.8205179572105408,
+      0.2510930299758911,
+      0.24164503812789917,
+      0.7789930701255798
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_land_wood.rigid_model_v2",
+    "sea": false,
+    "scale": 0.5001528506698368,
+    "height": -0.006823022788381083,
+    "yaw": 3.141592653589793
+  },
+  "land_dwf": {
+    "triangles": 36,
+    "vertices": 72,
+    "meshes": 1,
+    "bounds": [
+      -0.11985847353935242,
+      0.004840692970901728,
+      -0.17276619374752045,
+      0.11985140293836594,
+      0.17867279052734375,
+      0.17968593537807465
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_land_dwf.rigid_model_v2",
+    "sea": false,
+    "scale": 2.2698117953911487,
+    "height": -0.010987462003219765,
+    "yaw": 0.0
+  },
+  "land_chd": {
+    "triangles": 476,
+    "vertices": 865,
+    "meshes": 1,
+    "bounds": [
+      -0.4753791093826294,
+      0.0007589047309011221,
+      -0.4121001660823822,
+      0.4785219430923462,
+      0.35172131657600403,
+      0.38929659128189087
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_land_chd.rigid_model_v2",
+    "sea": false,
+    "scale": 0.8386614082501885,
+    "height": -0.0006364641103452655,
+    "yaw": 1.5707963267948966
+  },
+  "land_cth": {
+    "triangles": 235,
+    "vertices": 379,
+    "meshes": 1,
+    "bounds": [
+      -0.7326558232307434,
+      -0.18405218422412872,
+      -0.2091265320777893,
+      0.2751409411430359,
+      0.6655161380767822,
+      0.21186180412769318
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_land_cth.rigid_model_v2",
+    "sea": false,
+    "scale": 0.6473876032835344,
+    "height": 0.11915310242395824,
+    "yaw": 1.5707963267948966
+  },
+  "land_hef": {
+    "triangles": 270,
+    "vertices": 358,
+    "meshes": 1,
+    "bounds": [
+      -1.494670033454895,
+      -0.20381151139736176,
+      -0.36103516817092896,
+      1.0318306684494019,
+      0.7422803640365601,
+      0.36013364791870117
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_land_hef.rigid_model_v2",
+    "sea": false,
+    "scale": 0.31664349010353204,
+    "height": 0.06453558829213643,
+    "yaw": 1.5707963267948966
+  },
+  "land_def": {
+    "triangles": 274,
+    "vertices": 502,
+    "meshes": 1,
+    "bounds": [
+      -0.20287103950977325,
+      0.0,
+      -0.5674834251403809,
+      0.20526018738746643,
+      0.37772876024246216,
+      0.37986356019973755
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_land_def.rigid_model_v2",
+    "sea": false,
+    "scale": 0.8444635517711416,
+    "height": -0.0,
+    "yaw": 3.141592653589793
+  },
+  "land_chs": {
+    "triangles": 987,
+    "vertices": 1793,
+    "meshes": 1,
+    "bounds": [
+      -1.8771783113479614,
+      -0.036915719509124756,
+      -1.9423542022705078,
+      2.0510547161102295,
+      4.540594577789307,
+      4.294946193695068
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_land_chs.rigid_model_v2",
+    "sea": false,
+    "scale": 0.12015265161164153,
+    "height": 0.004435521585172945,
+    "yaw": 0.0
+  },
+  "land_grn": {
+    "triangles": 1155,
+    "vertices": 1974,
+    "meshes": 1,
+    "bounds": [
+      -1.2620315551757812,
+      -0.0011902451515197754,
+      -0.8705105781555176,
+      1.2552440166473389,
+      1.327467679977417,
+      3.3797264099121094
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_land_grn.rigid_model_v2",
+    "sea": false,
+    "scale": 0.18822479834559075,
+    "height": 0.00022403365362662684,
+    "yaw": 0.0
+  },
+  "land_sla": {
+    "triangles": 816,
+    "vertices": 1039,
+    "meshes": 1,
+    "bounds": [
+      -3.407008171081543,
+      -0.005952239036560059,
+      -1.956495761871338,
+      3.4118340015411377,
+      3.485227584838867,
+      5.214385986328125
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_land_sla.rigid_model_v2",
+    "sea": false,
+    "scale": 0.1115622915132957,
+    "height": 0.0006640454265535316,
+    "yaw": 0.0
+  },
+  "sea_emp": {
+    "triangles": 268,
+    "vertices": 367,
+    "meshes": 2,
+    "bounds": [
+      -0.8285529017448425,
+      -0.1416780799627304,
+      -1.2846710681915283,
+      0.8281950354576111,
+      2.0688180923461914,
+      1.303651213645935
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_emp.rigid_model_v2",
+    "sea": true,
+    "scale": 0.24881291670616668,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_brt": {
+    "triangles": 208,
+    "vertices": 283,
+    "meshes": 2,
+    "bounds": [
+      -0.9399453997612,
+      -0.17643442749977112,
+      -1.204359531402588,
+      0.9400590062141418,
+      2.232285499572754,
+      1.6114552021026611
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_brt.rigid_model_v2",
+    "sea": true,
+    "scale": 0.22833704899367485,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_dwf": {
+    "triangles": 217,
+    "vertices": 479,
+    "meshes": 4,
+    "bounds": [
+      -0.4239814877510071,
+      -0.17939354479312897,
+      -1.474631667137146,
+      0.4260875880718231,
+      1.1574958562850952,
+      1.3796675205230713
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_dwf.rigid_model_v2",
+    "sea": true,
+    "scale": 0.2802789572510764,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_chd": {
+    "triangles": 1909,
+    "vertices": 3057,
+    "meshes": 1,
+    "bounds": [
+      -0.3739372193813324,
+      -0.363884299993515,
+      -1.1508814096450806,
+      0.38610854744911194,
+      1.1256977319717407,
+      1.162574291229248
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_chd.rigid_model_v2",
+    "sea": true,
+    "scale": 0.345803033832744,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_cth": {
+    "triangles": 1843,
+    "vertices": 3326,
+    "meshes": 1,
+    "bounds": [
+      -0.2891480624675751,
+      -0.13141752779483795,
+      -1.308954119682312,
+      0.2891485095024109,
+      2.208237648010254,
+      1.2669988870620728
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_cth.rigid_model_v2",
+    "sea": true,
+    "scale": 0.23507737622521283,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_hef": {
+    "triangles": 231,
+    "vertices": 282,
+    "meshes": 1,
+    "bounds": [
+      -0.41731685400009155,
+      -0.23421932756900787,
+      -1.7566168308258057,
+      0.5313831567764282,
+      2.3623318672180176,
+      1.9180346727371216
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_hef.rigid_model_v2",
+    "sea": true,
+    "scale": 0.2118194322931931,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_def": {
+    "triangles": 226,
+    "vertices": 373,
+    "meshes": 1,
+    "bounds": [
+      -0.26751604676246643,
+      -0.20752450823783875,
+      -1.5567381381988525,
+      0.2608187198638916,
+      2.359598159790039,
+      1.5051898956298828
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_def.rigid_model_v2",
+    "sea": true,
+    "scale": 0.21424765043367505,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_wef": {
+    "triangles": 373,
+    "vertices": 496,
+    "meshes": 2,
+    "bounds": [
+      -1.5809662342071533,
+      -0.16459816694259644,
+      -1.3920618295669556,
+      1.4248316287994385,
+      1.5297327041625977,
+      1.6129698753356934
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_wef.rigid_model_v2",
+    "sea": true,
+    "scale": 0.2661522951512743,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_lzd": {
+    "triangles": 320,
+    "vertices": 650,
+    "meshes": 1,
+    "bounds": [
+      -0.5530787706375122,
+      0.09849196672439575,
+      -1.283596396446228,
+      0.5530790090560913,
+      2.3080601692199707,
+      1.5771641731262207
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_lzd.rigid_model_v2",
+    "sea": true,
+    "scale": 0.24891741263239034,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_skv": {
+    "triangles": 754,
+    "vertices": 1128,
+    "meshes": 1,
+    "bounds": [
+      -0.7637812495231628,
+      -0.5983058214187622,
+      -1.7627077102661133,
+      0.7533760666847229,
+      1.8833227157592773,
+      3.8918638229370117
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_skv.rigid_model_v2",
+    "sea": true,
+    "scale": 0.1414784471825095,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_tmb": {
+    "triangles": 537,
+    "vertices": 1082,
+    "meshes": 1,
+    "bounds": [
+      -0.8853188753128052,
+      -0.41009172797203064,
+      -1.5822032690048218,
+      0.8853184580802917,
+      1.6517168283462524,
+      1.961047649383545
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_tmb.rigid_model_v2",
+    "sea": true,
+    "scale": 0.2257813568461239,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_vmp": {
+    "triangles": 237,
+    "vertices": 372,
+    "meshes": 2,
+    "bounds": [
+      -0.9767158031463623,
+      -0.14721561968326569,
+      -1.2725111246109009,
+      0.9767154455184937,
+      2.0814208984375,
+      1.248374342918396
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_vmp.rigid_model_v2",
+    "sea": true,
+    "scale": 0.2467876639048219,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_cst": {
+    "triangles": 1662,
+    "vertices": 2611,
+    "meshes": 1,
+    "bounds": [
+      -1.2157779932022095,
+      -0.40389010310173035,
+      -1.8127285242080688,
+      1.2157789468765259,
+      3.47053861618042,
+      2.0569474697113037
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_cst.rigid_model_v2",
+    "sea": true,
+    "scale": 0.14195641211897259,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_ogr": {
+    "triangles": 380,
+    "vertices": 764,
+    "meshes": 1,
+    "bounds": [
+      -0.6691026091575623,
+      -0.10966766625642776,
+      -0.9994263648986816,
+      0.6698578000068665,
+      1.2184070348739624,
+      1.0138628482818604
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_ogr.rigid_model_v2",
+    "sea": true,
+    "scale": 0.3973597011112878,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_ksl": {
+    "triangles": 840,
+    "vertices": 1397,
+    "meshes": 1,
+    "bounds": [
+      -0.564971387386322,
+      -0.18961836397647858,
+      -1.2562109231948853,
+      0.564971387386322,
+      2.388335704803467,
+      1.264227032661438
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_ksl.rigid_model_v2",
+    "sea": true,
+    "scale": 0.21334747839797458,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_kho": {
+    "triangles": 1120,
+    "vertices": 1728,
+    "meshes": 1,
+    "bounds": [
+      -0.44114238023757935,
+      -0.10750336945056915,
+      -0.7337600588798523,
+      0.44114232063293457,
+      0.5460449457168579,
+      0.7338459491729736
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_kho.rigid_model_v2",
+    "sea": true,
+    "scale": 0.5451054272129993,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_nur": {
+    "triangles": 1169,
+    "vertices": 1792,
+    "meshes": 3,
+    "bounds": [
+      -0.8322389125823975,
+      -0.34490707516670227,
+      -1.2828391790390015,
+      0.8322391510009766,
+      2.722451686859131,
+      1.4723976850509644
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_nur.rigid_model_v2",
+    "sea": true,
+    "scale": 0.1793073594158752,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_sla": {
+    "triangles": 297,
+    "vertices": 577,
+    "meshes": 1,
+    "bounds": [
+      -0.6113684773445129,
+      -0.1322549283504486,
+      -0.7187522649765015,
+      0.6112261414527893,
+      1.2462044954299927,
+      0.9447593688964844
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_sla.rigid_model_v2",
+    "sea": true,
+    "scale": 0.3989961478094281,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_tze": {
+    "triangles": 1199,
+    "vertices": 1991,
+    "meshes": 1,
+    "bounds": [
+      -1.2099413871765137,
+      -0.08718793839216232,
+      -1.3291590213775635,
+      1.2098772525787354,
+      1.9499540328979492,
+      1.3295279741287231
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_tze.rigid_model_v2",
+    "sea": true,
+    "scale": 0.269986092158166,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_bst": {
+    "triangles": 168,
+    "vertices": 302,
+    "meshes": 3,
+    "bounds": [
+      -0.5545063018798828,
+      -0.514838695526123,
+      -0.4991130828857422,
+      0.5545056462287903,
+      0.7462807297706604,
+      2.4128599166870117
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_bst.rigid_model_v2",
+    "sea": true,
+    "scale": 0.2747278220359105,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_chs": {
+    "triangles": 247,
+    "vertices": 392,
+    "meshes": 2,
+    "bounds": [
+      -0.7442396283149719,
+      -0.12929542362689972,
+      -1.0803197622299194,
+      0.7442394495010376,
+      1.7264426946640015,
+      1.1129456758499146
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_chs.rigid_model_v2",
+    "sea": true,
+    "scale": 0.29637802585342127,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_nor": {
+    "triangles": 688,
+    "vertices": 963,
+    "meshes": 1,
+    "bounds": [
+      -0.9971719980239868,
+      -0.1700623780488968,
+      -1.7057913541793823,
+      0.9976248741149902,
+      2.3731443881988525,
+      1.6424435377120972
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_nor.rigid_model_v2",
+    "sea": true,
+    "scale": 0.21626240040697547,
+    "height": 0,
+    "yaw": 0.0
+  },
+  "sea_grn": {
+    "triangles": 147,
+    "vertices": 308,
+    "meshes": 3,
+    "bounds": [
+      -0.3636544644832611,
+      -0.1743895262479782,
+      -1.3513801097869873,
+      0.39668235182762146,
+      1.7143723964691162,
+      1.4508765935897827
+    ],
+    "model": "rigidmodels/derpy_mr_vehicle_sea_grn.rigid_model_v2",
+    "sea": true,
+    "scale": 0.2854841953044436,
+    "height": 0,
+    "yaw": 0.0
+  }
+}

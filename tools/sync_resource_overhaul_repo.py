@@ -46,7 +46,11 @@ CA_CLONE_FILES = ("building_effects_junction_tables__derpy_more_resources_ca.tsv
 
 # Anything that is art, a built pack, a CA ui file or a binary game format never goes public.
 REFUSED_EXT = (".png", ".dds", ".jpg", ".jpeg", ".webp", ".tga", ".pack", ".bin",
-               ".loc", ".anim", ".rigid_model_v2", ".wem", ".twui.xml")
+               ".loc", ".anim", ".rigid_model_v2", ".wem", ".twui.xml",
+               ".csc")   # composite scenes: binary ESF, the vehicle and icon scenes built off CA's
+# The generated route runtime embeds every campaign map's pathfinding grid, read out of CA's map
+# files: game data. terrain_routes.lua is the source; build_mr_terrain_routes rebuilds the runtime.
+REFUSED_FILES = ("Modding Files/pack/script/campaign/mod/derpy_more_resources_terrain_routes.lua",)
 
 
 def _tsvs(root=ROOT):
@@ -81,7 +85,19 @@ def manifest(root=ROOT):
         "gen_guilds_emitter.py",            # sync_derpy_hub builds the hub's .twui.xml with it
         "preview_guilds_panel.py",          # the .twui.xml reader both selftests use
         "preview_resource_vault.py",        # draws every Vault tab from the shipped Lua
+        # the trade routes on the campaign map (2026-10-21 on)
+        "build_mr_terrain_routes.py",       # route runtime, dash/vehicle/icon scenes, the grids
+        "campaign_route_paths.py",          # reads the installed map's pathfinding grid
+        "_resource_terrain_routes_harness.lua",    # the routes' test, run by gen_mr_ui --selftest
+        "test_service_labels.py",           # gen_mr_ui --selftest imports it
+        "rpfm_client.py",                   # build_mr_terrain_routes --probe-pack's RPFM client
     )] + ["Modding Files/reference/resource_overhaul_building_audit.md",
+          "Modding Files/source/resource_overhaul/terrain_routes.lua",
+          "Modding Files/source/resource_overhaul/trade_vehicles.json",
+          "Modding Files/source/resource_overhaul/trade_vehicle_manifest.json",
+          "Modding Files/source/resource_overhaul/cart_scene_builder/Program.cs",
+          "Modding Files/source/resource_overhaul/cart_scene_builder/cart_scene_builder.csproj",
+          "docs/RESOURCE_OVERHAUL_MECHANICS.md",
           "Modding Files/pack/script/campaign/mod/derpy_more_resources_ai.lua",
           "Modding Files/source/resource_overhaul/stores_panel.lua",
           "Modding Files/source/resource_overhaul/flows.lua",
@@ -108,6 +124,8 @@ def refused(m):
             bad.append((src, "CA's rows cloned out of db.pack"))
         elif os.path.basename(src) in CA_CLONE_FILES:
             bad.append((src, "CA's rows cloned out of db.pack"))
+        elif src in REFUSED_FILES:
+            bad.append((src, "embeds CA's campaign map grids"))
     return bad
 
 
@@ -120,8 +138,11 @@ def _selftest():
     for probe in ("ui/campaign ui/city_info_bar.twui.xml", "x/resource_derpy_amber.png",
                   _SRC + "resources_tables__derpy_more_resources.tsv",
                   _SRC + "building_effects_junction_tables__derpy_more_resources_ca.tsv",
-                  _SRC + "pooled_resources_tables__derpy_more_resources.tsv"):
+                  _SRC + "pooled_resources_tables__derpy_more_resources.tsv",
+                  _SRC + "route_vehicle_land_chd_0.csc", REFUSED_FILES[0]):
         assert refused([(probe, probe)]), "refused() let %s through" % probe
+    assert any(s.endswith("terrain_routes.lua") and "/source/" in s for s, _ in m), \
+        "the route source is missing from the manifest"
     print("selftest ok: %d files, nothing refused" % len(m))
 
 

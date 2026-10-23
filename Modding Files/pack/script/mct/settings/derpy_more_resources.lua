@@ -13,7 +13,7 @@ local LOCK_REASON = "Fixed when a campaign starts. Change it from the main menu 
 local m = mct:register_mod("derpy_more_resources")
 m:set_title("Derpy Resource Overhaul")
 m:set_author("_D3rpyN3wb_")
-m:set_description("How goods move between settlement stores. These are fixed for the life of a campaign: change them from the main menu before starting a new one. In a multiplayer campaign they are ignored and every value is the default on every machine.")
+m:set_description("How goods move between settlement stores. These are fixed for the life of a campaign: change them from the main menu before starting a new one. In a multiplayer campaign they are ignored and every value is the default on every machine. The trade route lines can be changed at any time.")
 m:add_new_section("stores", "Stores")
 
 local o_raid = m:add_new_option("raid", "slider")
@@ -48,7 +48,7 @@ if IN_CAMPAIGN then o_raze:set_locked(true, LOCK_REASON) end
 
 local o_trade = m:add_new_option("trade", "slider")
 o_trade:set_text("Trade share per turn")
-o_trade:set_tooltip_text("Each turn, every trade agreement sends this share of a resource from the sender's fullest store to the partner's capital, for each resource the partner lacks. 0 turns this off.")
+o_trade:set_tooltip_text("Each turn, trade partners receive this share of removable surplus toward their capital import targets. Keep reserves and cargo already on the road are respected. 0 turns this off.")
 o_trade:slider_set_precision(0)
 o_trade:slider_set_min_max(0, 25)
 o_trade:slider_set_step_size(1, 0)
@@ -65,6 +65,16 @@ o_duty:slider_set_step_size(1, 0)
 o_duty:set_default_value(10)
 o_duty:set_assigned_section("stores")
 if IN_CAMPAIGN then o_duty:set_locked(true, LOCK_REASON) end
+
+local o_reach = m:add_new_option("reach", "slider")
+o_reach:set_text("Trade reach in turns")
+o_reach:set_tooltip_text("Trade agreements move resources and import duty only while the road between the two capitals takes no more than this many turns and keeps out of lands at war with, or very unfriendly to, either side. The Trade tab lists the partners cut off and why.")
+o_reach:slider_set_precision(0)
+o_reach:slider_set_min_max(1, 10)
+o_reach:slider_set_step_size(1, 0)
+o_reach:set_default_value(6)
+o_reach:set_assigned_section("stores")
+if IN_CAMPAIGN then o_reach:set_locked(true, LOCK_REASON) end
 
 local o_ships = m:add_new_option("ships", "slider")
 o_ships:set_text("Shipments on the road")
@@ -85,6 +95,27 @@ o_recruit_per:slider_set_step_size(1, 0)
 o_recruit_per:set_default_value(1)
 o_recruit_per:set_assigned_section("stores")
 if IN_CAMPAIGN then o_recruit_per:set_locked(true, LOCK_REASON) end
+
+local o_army_provisions = m:add_new_option("army_provisions", "checkbox")
+o_army_provisions:set_text("Carried army provisions")
+o_army_provisions:set_tooltip_text("Armies eat carried provisions once each turn and refill locally above settlement Keep. Five turns target, ten turns capacity. At sea or without settlements, Load can buy two meals at 10 gold per ration once per turn; human Auto never buys. Foreign land still prevents local refill. Consecutive shortages reduce movement and replenishment. On by default for new campaigns; existing campaign switches stay saved.")
+o_army_provisions:set_default_value(true)
+o_army_provisions:set_assigned_section("using")
+if IN_CAMPAIGN then o_army_provisions:set_locked(true, LOCK_REASON) end
+
+local o_processing = m:add_new_option("processing", "checkbox")
+o_processing:set_text("Additional processing batches")
+o_processing:set_tooltip_text("Allow local workshops to spend stored inputs on extra batches. Passive production is unchanged. Enable individual recipes in a settlement's Stores view.")
+o_processing:set_default_value(true)
+o_processing:set_assigned_section("using")
+if IN_CAMPAIGN then o_processing:set_locked(true, LOCK_REASON) end
+
+local o_services = m:add_new_option("services", "checkbox")
+o_services:set_text("Sustained services")
+o_services:set_tooltip_text("Allow optional province services paid each turn with named goods. Enable them in the province capital's Stores view.")
+o_services:set_default_value(true)
+o_services:set_assigned_section("using")
+if IN_CAMPAIGN then o_services:set_locked(true, LOCK_REASON) end
 
 local o_ai = m:add_new_option("ai", "checkbox")
 o_ai:set_text("Other factions use their stores")
@@ -143,3 +174,54 @@ o_escort:set_tooltip_text("Every shipment travels with an escort of its owner's 
 o_escort:set_default_value(true)
 o_escort:set_assigned_section("using")
 if IN_CAMPAIGN then o_escort:set_locked(true, LOCK_REASON) end
+
+m:add_new_section("routes", "Trade route lines")
+
+local o_route_agreements = m:add_new_option("route_agreements", "checkbox")
+o_route_agreements:set_text("Trade agreements")
+o_route_agreements:set_tooltip_text("Show agreement roads permitted by the resource import and export switches.")
+o_route_agreements:set_default_value(true)
+o_route_agreements:set_assigned_section("routes")
+
+local o_route_contracts = m:add_new_option("route_contracts", "checkbox")
+o_route_contracts:set_text("Standing contracts")
+o_route_contracts:set_tooltip_text("Show roads for enabled standing contracts.")
+o_route_contracts:set_default_value(true)
+o_route_contracts:set_assigned_section("routes")
+
+local o_route_shipments = m:add_new_option("route_shipments", "checkbox")
+o_route_shipments:set_text("Travelling shipments")
+o_route_shipments:set_tooltip_text("Show roads and markers for cargo already dispatched. Stopping future trade does not recall it.")
+o_route_shipments:set_default_value(true)
+o_route_shipments:set_assigned_section("routes")
+
+local o_route_carts = m:add_new_option("route_carts", "checkbox")
+o_route_carts:set_text("Moving carts and boats")
+o_route_carts:set_tooltip_text("Show decorative minecarts on land and transport boats at sea. This does not change deliveries.")
+o_route_carts:set_default_value(true)
+o_route_carts:set_assigned_section("routes")
+
+local o_route_icons = m:add_new_option("route_icons", "checkbox")
+o_route_icons:set_text("Resource icons above traffic")
+o_route_icons:set_tooltip_text("Show an available resource permitted by the trade switches. Shipment and contract vehicles show their assigned resource. Empty returns have no icon.")
+o_route_icons:set_default_value(true)
+o_route_icons:set_assigned_section("routes")
+
+local o_route_size = m:add_new_option("route_size", "dropdown")
+o_route_size:set_text("Line size")
+o_route_size:set_tooltip_text("How big the dashes of the trade route lines on the campaign map are. A change shows within a few seconds, in a campaign too.")
+o_route_size:set_assigned_section("routes")
+o_route_size:add_dropdown_value("small", "Small", "Thinner, shorter dashes.", true)
+o_route_size:add_dropdown_value("normal", "Normal", "The dashes as designed.", false)
+o_route_size:add_dropdown_value("large", "Large", "Thicker, longer dashes, easier to see from far away.", false)
+o_route_size:set_default_value("small")
+
+local o_route_colours = m:add_new_option("route_colours", "dropdown")
+o_route_colours:set_text("Line colours")
+o_route_colours:set_tooltip_text("The four colours of the trade route lines on the campaign map. Each faction's routes keep one of the four, so you can tell whose they are. A change shows within a few seconds, in a campaign too.")
+o_route_colours:set_assigned_section("routes")
+o_route_colours:add_dropdown_value("default", "Default", "Gold, blue, green and red.", true)
+o_route_colours:add_dropdown_value("bright", "Bright", "Aqua, violet, yellow and amber: strong colours that stand out from far away.", false)
+o_route_colours:add_dropdown_value("pale", "Pale", "Pale blue, pink, cream and sage.", false)
+o_route_colours:add_dropdown_value("colourblind", "Colour-blind friendly", "Magenta, teal, red-orange and light yellow: they stay apart for every common kind of colour blindness.", false)
+o_route_colours:set_default_value("default")

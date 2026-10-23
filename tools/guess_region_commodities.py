@@ -54,10 +54,8 @@ RULES = [
      "Cane grows on hot coasts and is distilled in the harbours; the Vampire Coast and Sartosa run on grog."),
     ("amber", lambda g: g["coastal"] and g["areas"] & {"kislev", "norsca"},
      "Amber washes up on the Sea of Claws coasts of Kislev and Norsca."),
-    ("grain", lambda g: (g["climate"] == "climate_temperate" and g["areas"] & OLD_WORLD_FARMLAND)
-     or g["origin"] == "dwf",
-     "The farmland of the Empire, Bretonnia, Kislev and the Border Princes feeds the Old World; "
-     "the Dwarf holds grow their own barley."),
+    ("grain", lambda g: True,
+     "Working farms grow staples, including farms outside their culture's homeland."),
     ("warhorses", lambda g: g["climate"] in ("climate_temperate", "climate_savannah", "climate_desert")
      and (g["areas"] & {"bretonnia", "kislev", "araby"}) or g["origin"] in ("hef", "emp", "def"),
      "Bretonnian destriers, Kislevite steppe horses, Arabyan horses; Ellyrion's steeds, Averland's "
@@ -116,8 +114,8 @@ RULES = [
      "The poison flower of the Southlands jungles, the Witch Elves' favourite. Lustria is left to the plumes."),
     ("incense", lambda g: g["climate"] == "climate_desert" and g["areas"] & {"araby", "nehekara"},
      "Frankincense of Araby, burned in the tombs of Nehekhara."),
-    ("salted_meat", lambda g: g["origin"] == "ogr" or g["areas"] & {"mountains_of_mourn"},
-     "Ogre Kingdoms herds and hunting grounds - the Mountains of Mourn."),
+    ("salted_meat", lambda g: True,
+     "Hunting buildings and settlement provisioners preserve local meat."),
     # second batch, 2026-10-01
     ("carpets", lambda g: g["areas"] & {"araby"},
      "Arabyan carpets, woven in the cities of Araby."),
@@ -150,6 +148,13 @@ RULES = [
 
 # CA's own common goods, made as common as ours (2026-10-02): CA put each on only 11-13 deposits.
 # Same shape as RULES; gen_resource_overhaul ships these through CA's own production effects.
+RULES += [
+    ("hardtack", lambda g: False, "Campaign biscuits are processed from stored grain and salt."),
+    ("leather", lambda g: True, "Hunting camps cure hides for ordinary equipment."),
+    ("cloth", lambda g: True, "Craft workshops weave plain cloth for everyday use."),
+    ("tools", lambda g: True, "Metalworking workshops make tools."),
+]
+
 CA_RULES = [
     ("salt", lambda g: g["coastal"] and g["climate"] in ("climate_temperate", "climate_savannah", "climate_desert",
                                                          "climate_island"),

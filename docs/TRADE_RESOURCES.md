@@ -1,5 +1,7 @@
 # Trade resources: how they are placed on the map and produced
 
+For the current mod-wide rules, see [Derpy Resource Overhaul: mechanics reference](RESOURCE_OVERHAUL_MECHANICS.md). This file preserves dated research and implementation notes; later corrections supersede earlier counts and assumptions.
+
 Measured 2026-10-01 against the 9.0 `db.pack` and the Assembly Kit's raw start-position data.
 Re-run the survey after a patch: `py tools/survey_resource_map.py` (RPFM can stay shut).
 
@@ -1979,8 +1981,10 @@ Siege Stores or Restore). Each is gated to one culture.
   and asserts both army routes leave no booking and charge the next ordinary recruit. Three mutants
   (player route books, computer route books, pool route books nothing), all caught. A save from
   before keeps any booking it already holds: at most one free recruit per earlier army-route purchase.
-  **Still unmeasured:** whether recruiting from the mercenary pool fires `UnitTrained` (31). If it
-  does not, the pool route has the same leak.
+  **Measured 2026-10-19:** recruiting the Workshop Demigryph from CA's mercenary UI fires
+  `UnitTrained` and consumes the free booking; the army grew, the pool emptied, and the booking
+  cleared. The player/direct-army and AI Workshop routes also booked none. See the
+  [live test](sessions/LIVE_TEST_20261019_RESOURCE_OVERHAUL.md).
 - **Siege Stores and An Enemy Shipment have their own pictures.** CA's event pictures live per race,
   `ui/eventpics/<race>/<name>.png`, and `food_merchant` exists only under `grn/`, so every race drew
   Grom's troll. Siege Stores is now `besieged` (20 race folders, each race its own burning town) and
@@ -1992,3 +1996,69 @@ Siege Stores or Restore). Each is gated to one culture.
   The IEE and Old World packs' byte differences from `Modpacks/` (noted 2026-10-12) were RPFM's
   per-save table headers: every row decodes identical. Backup:
   `Modding Files/Backup/resource_overhaul_20261012_free_recruit/`. Not seen in game.
+
+## 39. Follow-up live test, 2026-10-19
+
+Build `26156b30`, isolated Empire IE campaign through the Warhammer MCP, turns 1-5.
+The October 12 recruitment fixes and both dilemma pictures were verified; food, oathgold
+and infamy conversions, food overflow refusal, six panel refreshes and exact save/reload
+state also passed. Three-turn soak completed with no Resource Overhaul Lua exception.
+Setup, warnings, test limits and restored settings: [live record](sessions/LIVE_TEST_20261019_RESOURCE_OVERHAUL.md).
+
+## 40. Stock reserves, import targets and forecasts, 2026-10-19
+
+Build `86e2cdbb`, deployed locally. Automatic five-turn shared reserves and ten-turn capital targets have per-resource Keep/Target overrides in the Trade drill-down. Trade, Send here, standing shipments and Sell surplus protect outgoing stock; ordinary consumption, purchases and enemy seizure can still use it. Standing orders count net incoming quantities. Settlement and Spending tooltips show recurring-use estimates with known/unknown production and incoming cargo separately.
+
+Offline checks, mutation checks, UI previews, five AI-enabled turn cycles, old-save Auto migration and exact policy persistence passed. No Resource Overhaul exception; four known CA Nurgle-listener warnings. Compatibility DB content is unchanged and those packs were not deployed. Preferences and temporary launch configuration were restored.
+
+Limits: real multiplayer unverified; named-save UI inactive, so persistence used a retained engine-autosave checkpoint. Averland still had no food production and an empty food buffer; this needs production/trade-access balance, not an AI reserve exemption. Detailed evidence, changed files, hashes and test setup: [stock-target handoff](sessions/HANDOFF_20261019_RESOURCE_STOCK_TARGETS.md).
+
+## 41. Additional processing and sustained services, 2026-10-20
+
+Build `ddc11a09` was prepared in Modpacks, then locally deployed and [verified through Warhammer MCP](sessions/LIVE_TEST_20261020_RESOURCE_PROCESSING_SERVICES.md): all recipes/services, three real cycles, native capture cleanup and exact named-save reload passed. The user selected only priorities #3 and #4. Local brewing, meat preservation and powder mixing spend complete input batches for extra stored output; passive building production is unchanged. Optional Dwarf drinking halls, Empire civic records and Cathay tea houses consume named baskets for province bonuses. Enable/Pause controls are in each eligible settlement's Stores view. Named input demand feeds existing reserves/targets and forecasts; AI pays the same costs within a two-basket budget.
+
+Both harnesses, 15/15 mutations, generator checks and 17 preview views pass. Saved-pack review matches all 45 DB fragments and 874 localisation rows; only four tables change semantically. Enabled main is now `ddc11a09`; the later MCP test began with Warhammer closed, and original preferences/launch settings were restored afterward. Army provisions and routes/contracts are deferred. Behavior, recipes, service costs, limitations and build review: [processing/services handoff](sessions/HANDOFF_20261020_RESOURCE_PROCESSING_SERVICES.md).
+
+
+## 42. Carried army provisions (#5), 2026-10-20
+
+Implemented as an off-by-default campaign option in build/enabled copy `cfdb364fc42cfe32553e47eff11475ab`. Original-goods cargo follows force CQI; local loading above Keep, once-per-turn meals, staged shortages and Vault controls reuse the existing flows state and request door. No extra goods, processing/services or routes.
+
+[Implementation handoff](sessions/HANDOFF_20261020_ARMY_PROVISIONS.md) records sources, exact pack/evidence paths, 13/13 army and 15/15 economy mutations and 18 previews. [Later native verification](sessions/LIVE_TEST_20261020_ARMY_PROVISIONS.md) supersedes the initial zero-cycle blocker: six real cycles, all shortage stages/recovery, paid AI resupply, a native replenishment-floor sample, exact 446-record reload, sea travel and owner transfer pass. Actual player-driven merge, prolonged AI balance and two-machine multiplayer remain open. Default stays off. Clean turn-9 checkpoint retained; game exited and original settings restored. (Default changed later the same day: on for new campaigns, see §45.)
+
+## 43. Army supply planning and paid AI relief, 2026-10-20
+
+Build `8208d215`, locally deployed and MCP-verified. Eligible Auto-refill armies add their meals to their owned, unsieged land region's Keep and Target; loading may spend that army share of the reserve but not settlement, named-input or explicit Keep. AI relief sends ordinary paid carts of common provisions from other owned settlements to the region with the worst shortage, after meals and before province supplies, under the usual holds, capacity, loss, travel time and one-cart AI cap. No free food, no AI movement orders. Real carts arrived in three cultures over four owner turns; exact state/stock reload passed. General AI balance stays open. [Handoff](sessions/HANDOFF_20261020_ARMY_SUPPLY_RECOVERY.md).
+
+## 44. Routes and contracts (#6), 2026-10-20
+
+Build `ff9abc08`, locally deployed and MCP-verified. New carts save a duration of `clamp(ceil(distance / 40), 1, 6)` turns, a due turn and their actual gross (at most 100); old carts keep the two-turn fallback. Human buyers create recurring named-good orders (50 per buyer) from an owned or treaty-partner source: internal orders are free, partner contracts lock the ordinary category price and take escrow per dispatched batch. Delivery pays only what fits and refunds the rest; cancellation, war, destination loss, a dead party or seizure return cargo and refund through one settlement path. Native delivery, partial payment and all refund cases passed, with exact in-flight reload. Two-machine MP, long balance and native faction-death settlement stay open. [Handoff](sessions/HANDOFF_20261020_ROUTES_CONTRACTS.md).
+
+## 45. Exchange appetites deployed, content expansion, provisions on the army bar, 2026-10-20
+
+- Exchange `2e2c7b99` (culture, war and construction demand for the 37 optional goods, fund baskets unchanged) deployed to its Workshop folder and MCP-checked. Load still recalculates quotes, so after real turns some price steps differ from their pre-save values. [Appetites](sessions/HANDOFF_20261020_EXCHANGE_RESOURCE_APPETITES.md), [deployment](sessions/HANDOFF_20261020_ECONOMY_CONTENT_AND_EXCHANGE.md).
+- Main `e1166d90`: five processing recipes (Printing, Carpet weaving, Brewing extended to Empire and Bretonnia) and six services (Village feasts, Scholars' halls, Factory mess added). Seven native AI payment cases and turns 15 to 17 passed. Same deployment handoff.
+- Main `e9d7b2ac`: a Provisions button on the native army action bar for a selected own lord, its badge the army's meal need, click opens that army in the Vault. **Army provisions now default on for new campaigns**; saved campaigns keep their switch, and a saved settings record with no provisions key stays off. [Army-bar handoff](sessions/HANDOFF_20261020_ARMY_BAR_PROVISIONS.md).
+
+## 46. Provision icon and culture coverage, 2026-10-21
+
+- The army-bar button uses its own fork-and-plate icon, `ui/skins/default/derpy_mr_provisions.png`. [Icon handoff](sessions/HANDOFF_20261021_PROVISION_ICON.md).
+- Main `2e2b64b1`: Vampire Counts and Vampire Coast keep stores but eat no settlement or army meals. Grain on farm chains and Salted Meat on hunt chains lost their geographic gates; Chaos Dwarfs, Greenskins, Warriors of Chaos, Skaven, Cathay and Norsca get Salted Meat on their primary settlement chains (8/12/16/20/24). An army at sea, or of a faction with no settlements, can Buy field rations at 10 gold each, up to two meals, once per turn; human Auto never buys. Five native cycles passed. [Handoff](sessions/HANDOFF_20261021_PROVISION_COVERAGE.md), [native test](sessions/LIVE_TEST_20261021_PROVISION_COVERAGE.md).
+
+## 47. Essential goods and half-full starting cargo, 2026-10-21
+
+Main `eb1bb41e`, Exchange `0865835e`, both deployed and MCP-verified. Four new goods (Hardtack, processed only; Leather; Cloth; Tools) bring the stores to 58 (41 added). Four new recipes and two new services (Builders' yards, Field hospitals) make nine recipes and eight services. Each newly tracked eligible army gets five meals once, half its ten-meal capacity, with no store or gold debit; a saved force-ID registry stops repeat grants. The Exchange counts a completed Hardtack batch as supply. [Handoff](sessions/HANDOFF_20261021_ESSENTIAL_GOODS.md), [native test](sessions/LIVE_TEST_20261021_ESSENTIAL_GOODS.md). The follow-up [service-label fix](sessions/HANDOFF_20261021_SERVICE_BENEFIT_LABELS.md), main `e75ce0c9`, shows each service's real benefit in the Settlements view. Current rules: [mechanics reference](RESOURCE_OVERHAUL_MECHANICS.md).
+
+## 48. Rome 2 dashes and trade reach, 2026-10-22
+
+The 3D route dots became dashes in the four owner colours (enabled main `FCBC2DCA`). Main `63406BF4`, deployed and tested in game later that day: routes avoid land hostile to either party, and an agreement whose capital-to-capital road is longer than the trade reach (new MCT setting, 6 turns of 40 hexes) or walled off by hostile land moves no goods and no duty, and draws no line; partner contracts are judged on their own road. Native CA trade income is untouched. [Rules](RESOURCE_OVERHAUL_MECHANICS.md#trade-reach-2026-10-22), [handoff](sessions/HANDOFF_20261021_TERRAIN_TRADE_ROUTES.md#update-later-2026-10-22-rome-2-dashes-enemy-land-avoidance-trade-reach).
+
+## 49. Trade route line size and colours, 2026-10-22
+
+Two MCT settings that stay open in a campaign: line size (small, normal, large) and line colours (default, bright, pale, colour-blind friendly). Each combination is its own scene, 579 in all, tinted and scaled in its wrapper over a white 12-direction library. The Vault Map follows the colour set and now draws an agreement on its own trade road. Main `2775CA2F` deployed and tested in game. [Settings](RESOURCE_OVERHAUL_MECHANICS.md#campaign-settings), [current handoff](sessions/HANDOFF_20261022_TRADE_ROUTES_CURRENT.md).
+
+## 50. Traffic on the trade roads, 2026-10-22 to 2026-10-23
+
+Main `3AE6E88B`, in `data/` and `Modpacks/`, no Workshop item. In single player, low-detail rigid vehicles drive the agreement, contract and shipment roads: the supplier's culture picks one of nine land families or 23 ship styles, at most sixteen are in view, and each carries an icon of the good it moves. Import and export carts keep opposite lanes, and every route in view gets a cart before any gets a return cart. Cargo comes from a preview of the real allocator, so a cart shows a good only where that good would move. Nearby roads share corridors on both maps, and roads with the same two ends draw one link carrying all their goods. MCT has five visibility switches for lines and traffic. Reach answers are dropped on war, diplomatic events and region changes. The vehicles are decoration: none moves stock.
+
+Author decisions, 2026-10-23: computer-only pairs stay on the full reach rule, and the shallow-angle fork near Uzkulak is accepted. Open: a wool import switch cleared once around turn 2 of the 20-partner test with no script caller found (live check deferred), the companion campaigns, FPS with sixteen vehicles and two-machine multiplayer. [Current handoff](sessions/HANDOFF_20261022_TRADE_ROUTES_CURRENT.md), [rules](RESOURCE_OVERHAUL_MECHANICS.md#internal-shipments).

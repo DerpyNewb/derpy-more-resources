@@ -67,17 +67,22 @@ local function region(key, x, y, cap, held)
         has_effect_bundle = function(_, b) return BUNDLES[key] ~= nil and BUNDLES[key][b] ~= nil end,
         owning_faction = function() return r.owner and r.owner.iface or NULL end,
         settlement = function() return settlement end,
+        slot_list = settlement.slot_list,
         pooled_resource_manager = function()
             return {
                 resource = function(_, k)
+                    r.pool_reads = (r.pool_reads or 0) + 1
                     local stem = string.match(k, "^derpy_mr_store_(.+)$")
                     if not r.readable or not stem then return NULL end
                     return pool(r, stem)
                 end,
                 resources = function()
+                    r.pool_walks = (r.pool_walks or 0) + 1
                     local items = {}
                     if r.readable then
-                        for stem in pairs(r.held) do items[#items + 1] = pool(r, stem) end
+                        for _, g in ipairs(DERPY_MR_FLOWS_GOODS or {}) do
+                            if not r.missing_pools then items[#items + 1] = pool(r, g.stem) end
+                        end
                     end
                     return list(items)
                 end,
@@ -202,12 +207,20 @@ cm = {
         return t
     end,
     is_multiplayer = function() return MP end,
-    model = function() return { turn_number = function() return TURN end } end,
+    model = function() return { turn_number = function() return TURN end,
+        world = function() return { faction_list=function()
+            local items,keys={},{};for key in pairs(FACTIONS) do keys[#keys+1]=key end;table.sort(keys)
+            for _,key in ipairs(keys) do items[#items+1]=FACTIONS[key].iface end
+            return list(items)
+        end } end } end,
     -- the engine clamps a pool to [0, its maximum]; this stub does the same
     entity_add_pooled_resource_transaction = function(_, e, j, n)
         local r = e.__r
         LOG[#LOG + 1] = { r.key, j, n }
-        local stem = string.match(j, "^derpy_mr_store_(.+)_%a+$")
+        local stem, factor = string.match(j, "^derpy_mr_store_(.+)_(%a+)$")
+        local valid = false
+        for _, key in pairs(DERPY_MR_FLOWS_KIND) do if key == factor then valid = true end end
+        assert(valid, "unknown native store transaction: " .. tostring(j))
         r.held[stem] = math.max(0, math.min(r.cap, (r.held[stem] or 0) + n))
     end,
     apply_effect_bundle_to_region = function(_, b, rk, turns)
@@ -342,6 +355,9 @@ cm.saving_game_callbacks[1], cm.loading_game_callbacks[1] = thrower, thrower
 dofile("__STORES__")
 dofile("__FLOWS__")
 local F = DERPY_MR_FLOWS
+local distance_turns = F.route_turns
+-- Prior lifecycle fixtures test the legacy two-turn schedule; Stage 6 tests the real calculator below.
+F.route_turns = function() return 2 end
 F.init()                     -- not FIRST: the stores script's first tick wants a UI
 -- THE MOVES ARE MEASURED ALONE: settlements eating provisions (phase 4) has its own section below
 F.rates(); F.state.rates.upkeep = false; F.state.rates.events = false; F.state.rates.supply = false
@@ -485,91 +501,69 @@ decide("occupation_decision_raze_without_occupy", a1, hum, "ai1")
 eq(h1.held.coal, 50, "a reading from an earlier turn is not used"); ERRORS = {}
 TURN = TURN - 1; a1.readable = true
 
--- ---- trade ------------------------------------------------------------------------------
-local tA = faction("tA", { has = { res_derpy_coal = true } })
-local tA1, tA2 = region("tA1", 500, 0, 600, { coal = 100 }), region("tA2", 520, 0, 600, { coal = 300 })
-own(tA, tA1, true); own(tA, tA2)
-local tB = faction("tB", { has = { res_rom_iron = true } })
-local tB1 = region("tB1", 600, 0, 600, { iron = 200 }); own(tB, tB1, true)
-local tC = faction("tC")                                   -- a partner with no settlements
-tA.partners = { tB, tC }; tB.partners = { tA }; tC.partners = { tA }
+-- ---- trade targets ----------------------------------------------------------------------
 local function turn_start(f) fire("FactionTurnStart", { faction = function() return f.iface end }) end
-F.LACK_TEST = "exists"
-n = #LOG
-turn_start(tA)
-eq(tA2.held.coal, 285, "the fullest store sends 5%"); eq(tA1.held.coal, 100, "the other is untouched")
-eq(tB1.held.coal, 15, "into the partner's capital")
-eq(#LOG, n + 2, "one move, two transactions - nothing to the partner with no settlements")
-eq(LOG[n + 1][2], "derpy_mr_store_coal_traded", "booked to traded")
-turn_start(tB)
-eq(tB1.held.iron, 190, "the partner exports what the sender lacks"); eq(tA1.held.iron, 10, "to its capital")
-eq(tB1.held.coal, 15, "coal is not sent back: tA has coal by the rule")
-tB.has.res_derpy_coal = true; n = #LOG
-turn_start(tA); eq(#LOG, n, "a partner that has the good gets none of it")
-tB.has.res_derpy_coal = nil
--- the capital rule: a partner whose capital holds the good gets none
-F.LACK_TEST = "capital"; n = #LOG
-turn_start(tA); eq(#LOG, n, "capital rule: tB's capital already holds coal")
-tB1.held.coal = 0; turn_start(tA); eq(tB1.held.coal > 0, true, "capital rule: an empty capital store receives")
--- a partner with no settlements leaves the exporter untouched
-tA.partners = { tC }; local c2 = tA2.held.coal
-turn_start(tA); eq(tA2.held.coal, c2, "a partner with no settlements leaves the exporter untouched")
-tA.partners = { tB, tC }
--- trade sends surplus only: measured in game, a raided single wyvern scale left the same turn
-local tD, tE = faction("tD"), faction("tE")
-local tD1, tE1 = region("tD1", 900, 0, 600, { coal = 19 }), region("tE1", 950, 0, 600)
-own(tD, tD1, true); own(tE, tE1, true); tD.partners = { tE }
-turn_start(tD); eq(tD1.held.coal, 19, "a store under 20 at 5% trades nothing")
-tD1.held.coal = 20; turn_start(tD); eq(tD1.held.coal, 19, "at 20 it sends 1")
--- measured 2026-10-02: for some faction factions_trading_with() hands back a boolean, not a list
-tD.iface.factions_trading_with = function() return false end
-ERRORS = {}; turn_start(tD); eq(#ERRORS, 0, "a trade list that comes back a boolean is skipped, not an error")
-
--- ---- the switch: goods move between other factions -------------------------------------
-F.state.rates.ai = false
-n = #LOG; tB1.held.coal = 0
-turn_start(tA); eq(#LOG, n, "switch off: two computer-run factions trade nothing")
-hum.partners = { tA }; tA.partners = { hum }; h1.held = {}; h2.held = {}
-turn_start(tA); eq(h1.held.coal > 0, true, "switch off: a player's partner still receives")
-F.state.rates.ai = true; tA.partners = { tB, tC }; hum.partners = {}
-
--- trade never destroys stock: a partner with little room gets what fits and the sender keeps the rest
-local tD = faction("tD"); local tD1 = region("tD1", 700, 0, 2000, { salt = 1000 }); own(tD, tD1, true)
-local tE = faction("tE"); local tE1 = region("tE1", 710, 0, 20, {}); own(tE, tE1, true)
-tD.partners = { tE }
-turn_start(tD)
-eq(tE1.held.salt, 20, "a partner with little room gets what fits")
-eq(tD1.held.salt, 980, "and the sender loses only that - trade never destroys stock")
-F.LACK_TEST = "exists"           -- tE has no salt by the engine's word, so only space stops it
-turn_start(tD)
-eq(tD1.held.salt, 980, "a full partner store takes nothing and costs the sender nothing")
-F.LACK_TEST = "capital"; tD.partners = {}
-
--- a history snapshot that throws must not stop a human's exports (they are model state)
+local tA = faction("tA", { human = true })
+local tB = faction("tB", { human = true })
+local tA1 = region("tA1", 500, 0, 600, { coal = 100 })
+local tA2 = region("tA2", 520, 0, 600, { coal = 300 })
+local tB1 = region("tB1", 600, 0, 600, { coal = 1, iron = 200 })
+own(tA, tA1, true); own(tA, tA2); own(tB, tB1, true)
+local tC = faction("tC")
+tA.partners = { tC, tB }; tB.partners = { tA }
+F.set_stock_policy("tB", "coal", "target", "25")
+F.set_stock_policy("tA", "iron", "target", "30")
+F.trade(tA.iface)
+eq(tA2.held.coal, 285, "fullest removable store exports 5%")
+eq(tB1.held.coal, 16, "nonzero capital stock still receives")
+F.trade(tA.iface)
+eq(tB1.held.coal, 25, "next export stops at target")
+local c2 = tA2.held.coal
+F.trade(tA.iface); eq(tA2.held.coal, c2, "target reached: no more exports")
+F.set_stock_policy("tB", "coal", "target", "0")
+tB1.held.coal = 0; F.trade(tA.iface)
+eq(tB1.held.coal, 0, "zero refuses scripted requests")
+F.trade(tB.iface); eq(tA1.held.iron, 10, "reverse direction has its own target")
+F.set_stock_policy("tA", "coal", "keep", "290")
+F.set_stock_policy("tB", "coal", "target", "100")
+F.trade(tA.iface)
+eq(tB1.held.coal, 0, "both sources below manual Keep")
+F.set_stock_policy("tA", "coal", "keep", "90")
+tA2.held.coal, tA1.held.coal = 80, 140
+F.trade(tA.iface)
+eq(tA1.held.coal, 138, "smaller raw store with removable stock wins")
+eq(tA2.held.coal, 80, "protected store left alone")
+-- Snapshot failures cannot suppress model exports.
 hum.partners = { tB }; h1.held = { salt = 100 }; tB1.held.salt = 0
+F.set_stock_policy("tB", "salt", "target", "20")
 local real_read = DERPY_MR_STORES.read_realm
 DERPY_MR_STORES.read_realm = function() error("a UI-side read threw") end
 turn_start(hum)
 DERPY_MR_STORES.read_realm = real_read
-eq(tB1.held.salt, 5, "the human's exports still went out")
-eq(#ERRORS, 1, "and the snapshot's failure was logged"); ERRORS = {}
-hum.partners = {}
+eq(tB1.held.salt, 5, "exports survive snapshot failure")
+eq(#ERRORS, 1, "snapshot failure logged"); ERRORS = {}
+hum.partners = {}; tA.partners = {}; tB.partners = {}
 
 -- ---- the player's trade switches (the Stores panel's Trade tab) ------------------------
 local tP = faction("tP", { human = true })
 local tP1 = region("tP1", 1200, 0, 600, { coal = 100 }); own(tP, tP1, true)
-local tQ = faction("tQ"); local tQ1 = region("tQ1", 1300, 0, 600, { iron = 100 }); own(tQ, tQ1, true)
+local tQ = faction("tQ"); local tQ1 = region("tQ1", 1300, 0, 600, { iron = 250 }); own(tQ, tQ1, true)
 tP.partners = { tQ }; tQ.partners = { tP }
+F.state.rates.upkeep = true
+F.set_stock_policy("tP", "iron", "target", "100")
+F.set_stock_policy("tP", "coal", "keep", "0")
 F.toggle("tP", "export", "coal"); eq(F.stopped("tP", "export", "coal"), true, "a click stops a good's exports")
-turn_start(tP); eq(tP1.held.coal, 100, "a stopped export stays home"); eq(tQ1.held.coal, nil, "and never arrives")
+F.trade(tP.iface); eq(tP1.held.coal, 100, "a stopped export stays home"); eq(tQ1.held.coal, nil, "and never arrives")
 F.toggle("tP", "export", "coal"); eq(F.stopped("tP", "export", "coal"), false, "a second click allows it again")
-turn_start(tP); eq(tP1.held.coal, 95, "an allowed export leaves")
+F.trade(tP.iface); eq(tP1.held.coal, 100, "an allowed export still needs partner demand")
 F.toggle("tP", "import", "iron")
-turn_start(tQ); eq(tP1.held.iron, nil, "a refused import is not sent"); eq(tQ1.held.iron, 100, "and the partner keeps it")
-F.toggle("tP", "import", "iron"); turn_start(tQ); eq(tP1.held.iron, 5, "an accepted import arrives")
+F.trade(tQ.iface); eq(tP1.held.iron, nil, "a refused import is not sent"); eq(tQ1.held.iron, 250, "and the partner keeps it")
+F.toggle("tP", "import", "iron"); F.trade(tQ.iface); eq(tP1.held.iron, 5, "an accepted import arrives")
 F.toggle("tQ", "export", "iron"); eq(F.stopped("tQ", "export", "iron"), false, "a computer-run faction has no switches")
 F.toggle("tP", "sideways", "coal"); eq(F.stopped("tP", "sideways", "coal"), false, "an unknown direction is ignored")
 F.toggle("tP", "export", "no_such_good"); eq(F.stopped("tP", "export", "no_such_good"), false, "an unknown good is ignored")
+F.state.rates.upkeep = false
+
 do
     -- A STOPPED EXPORT LEAVES CA'S TRADE TOO (TRADE_RESOURCES.md 28): a hidden faction marker per
     -- stopped good, which the DB's hold rows read, and the visible "Exports held" record
@@ -657,6 +651,61 @@ do
     dA.partners, dB.partners, dC.partners = {}, {}, {}
     TURN = t0
 end
+do
+    -- TRADE REACH (author, 2026-10-22): an agreement whose road is too long, or runs through enemy or
+    -- aggressive land, moves no resources and no duty; terrain_routes.lua R.reach answers, stubbed here
+    local rA = faction("rA", { human = true }); local rA1 = region("rA1", 7000, 0, 600, { coal = 300 }); own(rA, rA1, true)
+    -- as the first trade test's partner: a human whose capital holds 1, so a target of 50 is a real need
+    local rB = faction("rB", { human = true }); local rB1 = region("rB1", 7100, 0, 600, { coal = 1 }); own(rB, rB1, true)
+    local rB2 = region("rB2", 7150, 0, 600, {}); own(rB, rB2)
+    rA.partners, rB.partners = { rB }, { rA }
+    F.set_stock_policy("rB", "coal", "target", "50")
+    local asked, open, why = {}, false, "far"
+    DERPY_MR_TERRAIN_ROUTES = { reach = function(a, b, max)
+        asked[#asked + 1] = a:name() .. ">" .. b:name() .. "@" .. tostring(max)
+        return open, why
+    end }
+    local t0 = TURN; TURN = 900
+    F.trade(rA.iface); eq(rB1.held.coal, 1, "a partner out of reach gets no resources")
+    eq(table.concat(asked, " "), "rA1>rB1@" .. F.rates().reach * 40, "asked capital to capital, the reach in hexes")
+    eq(F.rates().reach, 6, "six turns unless the settings say otherwise")
+    F.trade(rB.iface); F.trade(rA.iface); eq(#asked, 1, "one answer per pair per turn, whichever side asks")
+    local cut = F.cut_off(rA.iface)
+    eq(#cut == 1 and cut[1].key .. ": " .. cut[1].why, "rB: Too far for trade", "the Trade tab lists who and why")
+    rB1.made = { coal = 30 }; local a0 = TREASURY.rA or 0
+    F.made_cache = nil; F.duty(rA.iface); eq((TREASURY.rA or 0) - a0, 0, "no trade, no duty")
+    why = "enemy"
+    local st, said = F.route_status(rA.iface, { seller = "rB", from = "rB2", to = "rA1", stem = "coal" })
+    eq(st == nil and said, "Cut off by enemy lands", "a partner contract between two settlements is judged on its own road")
+    open, why = true, nil; TURN = 901
+    F.trade(rA.iface); eq(rB1.held.coal, 16, "back in reach, the same trade runs")
+    eq(#asked, 3, "and a new turn asks again")   -- the capitals twice, and the contract's own pair once
+    F.made_cache = nil; a0 = TREASURY.rA or 0; F.duty(rA.iface)
+    eq((TREASURY.rA or 0) - a0 < 0, true, "and duty is paid again"); eq(#F.cut_off(rA.iface), 0, "nobody listed")
+    -- the map and the panel read old answers; they never work one out in multiplayer, where only the
+    -- economy's turn-start answers are the same on every machine
+    TURN = 902; MP = true
+    eq(F.trade_reach(rA.iface, rB.iface, "peek"), true, "an answer from an earlier turn still serves the map")
+    local rC = faction("rC"); local rC1 = region("rC1", 7200, 0, 600, {}); own(rC, rC1, true)
+    eq(F.trade_reach(rA.iface, rC.iface, "show"), nil, "unknown in multiplayer: nothing worked out")
+    eq(#asked, 3, "and nothing asked")
+    MP = false
+    eq(F.trade_reach(rA.iface, rC.iface, "show"), true, "single player works it out for the map")
+    for _,event in ipairs({'FactionLeaderDeclaresWar','PositiveDiplomaticEvent','NegativeDiplomaticEvent','RegionFactionChangeEvent'}) do
+        open=false; why='enemy'
+        DERPY_MR_TERRAIN_ROUTES.queue={{key='stale'}}
+        DERPY_MR_TERRAIN_ROUTES.cache={stale=true}
+        fire(event,{region=function() return rA1.iface end})
+        eq(#DERPY_MR_TERRAIN_ROUTES.queue,0,'discard obsolete queued paths')
+        eq(next(DERPY_MR_TERRAIN_ROUTES.cache),nil,'discard obsolete visual roads')
+        eq(F.trade_reach(rA.iface,rB.iface,'peek'),nil,event..' invalidates the displayed road')
+        eq(F.trade_reach(rA.iface,rB.iface),false,event..' recomputes reach within this turn')
+        open=true;why=nil
+        F.invalidate_reach()
+        eq(F.trade_reach(rA.iface,rB.iface),true,'a reopened road trades again')
+    end
+    DERPY_MR_TERRAIN_ROUTES = nil; rA.partners, rB.partners = {}, {}; TURN = t0
+end
 -- a click reaches the model through the network in multiplayer, never straight from the UI
 local function ui_trigger(cqi, id)
     fire("UITrigger", { trigger = function() return id end, faction_cqi = function() return cqi end })
@@ -718,7 +767,7 @@ local nobody = F.series("nobody", "coal"); eq(#nobody, 0, "no book, no series")
 for i = 1, 25 do F.push(bk, 100 + i, { coal = i }, {}) end
 eq(#bk.turns, 20, "twenty turns kept"); eq(bk.turns[1], 106, "the oldest dropped first")
 eq(#bk.total.coal, 20, "the series trimmed with them"); eq(bk.total.coal[20], 25, "newest last")
-eq(F.state.factions.tA, nil, "no history for a computer-run faction")
+eq(F.state.factions.tC, nil, "no history for a computer-run faction")
 
 -- ---- save and load ----------------------------------------------------------------------
 eq(cm.saving_game_callbacks[2], thrower, "our save callback went in ahead of another mod's")
@@ -755,6 +804,10 @@ local function option()
     function o:slider_set_step_size() end
     function o:set_assigned_section() end
     function o:set_default_value(v) self.value = v end
+    function o:add_dropdown_value(key, _text, _tip, default)
+        self.values = self.values or {}; self.values[#self.values + 1] = key
+        if default then self.flagged = key end
+    end
     function o:set_locked(v, why) self.locked, self.why = v, why end
     function o:get_finalized_setting() return self.value end
     return o
@@ -781,9 +834,27 @@ for k, o in pairs(MCT.derpy_more_resources.options) do eq(o.locked, nil, "the ma
 __game_mode = "campaign"
 dofile("__MCT__")
 local opt = MCT.derpy_more_resources.options
+eq(DERPY_MR_FLOWS_DEFAULTS.army_provisions, true, "new campaigns enable provisions")
+-- THE ROUTE LINES move no goods, so a campaign leaves them open; their values are terrain_routes.lua's R.SIZES
+-- and R.SETS, in that order (build_mr_terrain_routes --selftest compares the Lua to the scenes)
+local LINES = { route_size = { "small", "normal", "large", default = "small" },
+                route_colours = { "default", "bright", "pale", "colourblind", default = "default" } }
 for k, o in pairs(opt) do
-    eq(o.locked, true, "a campaign greys " .. k); eq(type(o.why) == "string" and #o.why > 0, true, "and says why")
+    if LINES[k] then
+        eq(o.locked, nil, "a campaign leaves " .. k .. " open")
+        eq(table.concat(o.values, ","), table.concat(LINES[k], ","), k .. "'s choices, in the scenes' order")
+        eq(o.value, LINES[k].default, k .. "'s default"); eq(o.flagged, LINES[k].default, "and the list marks it")
+        eq(F.mct(k), LINES[k].default, "F.mct reads " .. k)
+    elseif k:match('^route_') then
+        eq(o.locked,nil,'visibility stays editable in a campaign')
+        eq(o.value,true,'route visuals default on')
+    else
+        eq(o.locked, true, "a campaign greys " .. k); eq(type(o.why) == "string" and #o.why > 0, true, "and says why")
+    end
 end
+eq(opt.route_size ~= nil and opt.route_colours ~= nil, true, "both line options are on the page")
+opt.route_colours.value = "pale"; eq(F.mct("route_colours"), "pale", "a change reaches the map's next redraw")
+opt.route_colours.value = "default"
 for k, d in pairs(DERPY_MR_FLOWS_DEFAULTS) do
     eq(opt[k] ~= nil, true, "the MCT file has an option for " .. k)
     eq(opt[k].value, d, "the MCT default for " .. k .. " is the script's")
@@ -798,6 +869,8 @@ opt.raid.value = 35; eq(F.rates().raid, 35, "so an MCT change before the freeze 
 F.freeze_rates(); eq(F.state.rates and F.state.rates.raid, 35, "the freeze keeps what MCT says then")
 opt.raid.value = 40; eq(F.rates().raid, 35, "frozen: a later MCT change does not reach a running campaign")
 F.freeze_rates(); eq(F.rates().raid, 35, "and a second freeze does not move it")
+F.state.rates.army_provisions = false
+F.freeze_rates(); eq(F.rates().army_provisions, false, "existing campaign provisions stay off")
 F.state = { factions = {} }; F.on_faction_turn_start(faction("fz").iface)
 eq(F.state.rates and F.state.rates.raid, 40, "a turn start freezes too (a save from before first tick froze)")
 -- AT FIRST TICK: a new campaign fires no FactionTurnStart until turn 1 ends. F.init again, its
@@ -833,9 +906,12 @@ F.state = { factions = {}, rates = { raid = 25, sack = 50, raze = 50, trade = 5,
 eq(F.rates().upkeep, true, "a switch added after the freeze takes its value")
 eq(F.rates().actions, true, "every one of them")
 eq(F.rates().raid, 25, "the frozen rates stay frozen")
+eq(F.rates().army_provisions, false, "pre-provisions saved settings retain the old default")
 F.freeze_rates()
 opt.upkeep.value = false; eq(F.rates().upkeep, true, "and the new one is frozen too")
 get_mct = nil; F.state.rates = nil; F.freeze_rates()
+eq(F.rates().army_provisions, true, "fresh no-MCT campaign provisions default on")
+F.state.rates.army_provisions = false -- Legacy event fixtures do not model provision-capable forces.
 -- THE EVENTS ARE MEASURED ALONE, in their own section below, as the moves are
 eq(F.rates().events, true, "events on by default"); F.state.rates.events = false
 eq(F.rates().supply, true, "province supplies on by default"); F.state.rates.supply = false
@@ -910,6 +986,8 @@ eq(u1.held.grain + u1.held.salt, before, "upkeep off: nothing eaten")
 F.state.rates.upkeep = true
 eq(#ERRORS, 0, "no script errors in the upkeep pass")
 
+-- Lifecycle fixtures below disable upkeep bonuses; reserve-on cases are tested separately.
+F.state.rates.upkeep = false
 -- ---- phase 7: the panel's actions ------------------------------------------------------
 eq(F.rates().actions, true, "on by default")
 -- SEND HERE: from the fullest OTHER store, as much as arrives into the free space, 10% lost
@@ -1299,8 +1377,8 @@ local s5 = last_ship()
 eq(ships_of("pP"), 1, "a shipment leaves"); eq(s5.from, "po", "from the other settlement")
 eq(s5.to, "pc", "to the capital"); eq(s5.stem, "timber", "its fullest building material")
 eq(s5.due, 4010 + SH.turns, "due two turns on, for the panel")
-eq(po.held.timber, 75, "25 sent at once: ten turns of 4, less the 15 held")
-eq(s5.n, 22, "22 on the road: a tenth of 25, rounded up, is lost")
+eq(po.held.timber, 72, "28 sent to deliver the missing 25")
+eq(s5.n, 25, "25 net cargo after rounded loss")
 eq(pc.held.timber, 11, "the capital still pays this turn")
 eq(MARKERS[s5.id].info, SH.info, "drawn as a shipment marker"); eq(MARKERS[s5.id].r, SH.radius, "of its radius")
 eq(MARKERS[s5.id].x, po.x + 1, "beside the sender, where CA finds a spot")
@@ -1318,9 +1396,9 @@ pc.held.timber = 2
 TURN = 4012; turn_start(pP)
 eq(ships_of("pP"), 0, "arrived"); eq(MARKERS[s5.id], nil, "its marker gone")
 eq(SCENES[s5.id], nil, "and its wagons")
-eq(pc.held.timber, 2 + 22 - 4, "it arrives before the turn's payment, which 2 alone could not make")
+eq(pc.held.timber, 2 + 25 - 4, "it arrives before the turn's payment, which 2 alone could not make")
 eq(F.supply_state(pP.iface, "pc").on.materials, true, "so the supply stays on")
-eq(F.book("pP").now.timber.moved_in, 22, "booked as moved in")
+eq(F.book("pP").now.timber.moved_in, 25, "booked as moved in")
 -- the order is the player's: off, nothing ships
 pc.held.timber = 15; F.request("pP", "supply", "pc", "standing")
 TURN = 4020; turn_start(pP); eq(ships_of("pP"), 0, "Supply the capital off: nothing ships")
@@ -2402,7 +2480,7 @@ end)()
 
 -- ---- the run-cost counter (Task 7 reads it) --------------------------------------------
 local counters = F.cost
-turn_start(tA); eq(F.cost, counters, "a computer-run turn start keeps counting into the same round")
+turn_start(tC); eq(F.cost, counters, "a computer-run turn start keeps counting into the same round")
 turn_start(hum); eq(F.round_cost, counters, "a human's turn start hands the round's counters over")
 eq(F.cost.raid, 0, "and starts new ones")
 
@@ -2517,4 +2595,894 @@ eq(#ERRORS, 0, "script errors: " .. table.concat(ERRORS, "; "))
     cm.add_building_to_settlement, cm.instantly_upgrade_building_in_region = nil, nil
     eq(#ERRORS, 0, "no script errors in founding: " .. table.concat(ERRORS, "; "))
 end)()
+-- Stock targets: shared quantities, explicit zero and rounded shipment loss.
+;(function()
+    local v = { held = { grain = 20, salted_fish = 15 }, totals = { provisions = 35 },
+        auto_keep = { provisions = 30 }, auto_target = {}, incoming = {}, incoming_use = {},
+        capacity = { grain = 400, salted_fish = 400 }, recurring = {}, work_target = {}, policy = {} }
+    eq(F.available_stock(v, "grain"), 5, "shared food reserve")
+    v.held.grain, v.totals.provisions = 15, 30
+    eq(F.available_stock(v, "salted_fish"), 0, "food reserve is not spent twice")
+    v.policy.salted_fish = { keep = 0 }
+    eq(F.available_stock(v, "salted_fish"), 15, "zero overrides Auto")
+    v.held.grain, v.totals.provisions = 12, 12
+    v.incoming.grain, v.incoming_use.provisions = 18, 18
+    v.auto_target.provisions = 80
+    eq(F.import_need(v, "grain"), 50, "subtract held and incoming")
+    v.policy.grain = { target = 40 }
+    eq(F.import_need(v, "grain"), 10, "per-good target")
+    v.policy.grain.target = 0
+    eq(F.import_need(v, "grain"), 0, "zero disables requests")
+    local fit = F.fit_delivery(30, 10)
+    eq(fit.n, 12, "rounded dispatch"); eq(fit.got, 10, "net arrival")
+    fit = F.fit_delivery(11, 10)
+    eq(fit.n, 10, "avoid loss plateau"); eq(fit.got, 9, "partial arrival")
+    eq(F.fit_delivery(1, 10), nil, "one unit all lost")
+    v.recurring.provisions = 8
+    local fc = F.stock_forecast(v, { provisions = 6 }).provisions
+    eq(fc.net, -2, "net production"); eq(fc.cover, 6, "net cover")
+    eq(F.stock_forecast(v).provisions.cover, 1, "stored cover when production unknown")
+    eq(F.stock_forecast(v, { provisions = 8 }).provisions.mode, "stable", "production covers demand")
+    v.recurring.provisions = 0
+    eq(F.stock_forecast(v, {}).provisions.mode, "none", "no recurring use")
+    eq(F.stock_forecast(v, {}).provisions.production, 0, "confirmed zero is known production")
+end)()
+;(function()
+    local old_state, old_turn = F.state, TURN
+    F.state = { factions = {}, rates = F.read_rates(), ship_seq = 50000 }; TURN = 50000
+    local f = faction("policy_test", { human = true })
+    local a = region("policy_a", 80000, 0, 400, { grain = 20, salted_fish = 15, iron = 390, gromril = 900 })
+    local b = region("policy_b", 80010, 0, 400, { grain = 50, timber = 100 })
+    own(f, a, true); own(f, b); inprov("policy_province", a, b)
+    a.level = 3; b.level = 1
+    local v = F.stock_view(f.iface, a.iface)
+    eq(v.recurring.provisions, 6, "settlement level drives recurring food")
+    eq(v.auto_keep.provisions, 30, "five turns kept")
+    eq(v.auto_target.provisions, 60, "ten turns requested")
+    eq(v.totals.war, 390, "rare stock excluded from totals")
+    eq(v.auto_keep.war, 100, "quarter of one store kept for bonus")
+    eq(F.state.factions.policy_test, nil, "view creates no book")
+    eq(F.state.supply, nil, "view creates no supply book")
+    eq(F.state.ships, nil, "view creates no shipment list")
+    local supply = F.supply_book(f.name, a.prov, true); supply.materials = true
+    eq(F.stock_view(f.iface, a.iface).recurring.building, 4, "owned province supply cost")
+    eq(F.stock_view(f.iface, b.iface).recurring.building, nil, "only capital pays supply")
+    b.missing_pools = true
+    eq(F.stock_view(f.iface, b.iface).recurring.provisions, nil, "missing pools have no demand")
+    b.missing_pools = false
+    F.state.rates.upkeep, F.state.rates.supply = false, false
+    v = F.stock_view(f.iface, a.iface)
+    eq(v.auto_keep.war, 0, "disabled bonuses have no holding floor")
+    eq(next(v.recurring), nil, "disabled phases create no recurring demand")
+    F.state.rates.upkeep, F.state.rates.supply = true, true
+    local computer = faction("policy_ai")
+    local cr = region("policy_ai_r", 80100, 0, 400, { grain = 20 }); own(computer, cr, true)
+    F.state.rates.ai = false
+    eq(next(F.recurring_use(computer.iface, cr.iface)), nil, "AI demand obeys other factions switch")
+    F.state.rates.ai = true
+    local dead = faction("policy_dead", { human = true, sc = "wh2_dlc09_sc_tmb_tomb_kings" })
+    local dr = region("policy_dead_r", 80200, 0, 400, { grain = 20 }); own(dead, dr, true)
+    eq(next(F.recurring_use(dead.iface, dr.iface)), nil, "excluded faction has no recurring demand")
+    -- The existing synchronized request door remains editable with actions off.
+    F.state.rates.actions = false
+    MP = true; SENT = {}
+    F.request(f.name, "stock", "iron", "keep", "380")
+    eq(F.stock_policy(f.name, "iron").keep, nil, "MP click cannot write locally")
+    eq(SENT[1][2], "dmr1|stock|iron|keep|380", "compact stock request")
+    ui_trigger(f.cqi, SENT[1][2])
+    eq(F.stock_policy(f.name, "iron").keep, 380, "trigger writes with actions off")
+    for _, payload in ipairs({ "dmr1|stock|iron|keep|-1", "dmr1|stock|iron|keep|1.5",
+        "dmr1|stock|iron|keep|1000001", "dmr1|stock|iron|keep|nan", "dmr1|stock|iron|other|10",
+        "dmr1|stock|unknown|keep|10", "dmr1|stock|iron|keep|10|extra" }) do ui_trigger(f.cqi, payload) end
+    eq(F.stock_policy(f.name, "iron").keep, 380, "invalid requests cannot change policy")
+    eq(F.set_stock_policy(computer.name, "iron", "keep", "10"), false, "AI cannot edit")
+    eq(F.set_stock_policy(f.name, "iron", "keep", math.huge), false, "infinite policy refused")
+    eq(F.set_stock_policy(f.name, "iron", "keep", 0/0), false, "NaN policy refused")
+    MP = false
+    b.missing_pools = true
+    local sale = F.sale(f.iface, "iron")
+    eq(sale.n, 10, "sale respects protected amount below half-cap surplus")
+    F.sell(f.iface, "iron"); eq(a.held.iron, 380, "sale leaves exact Keep")
+    eq(F.ship(f.iface, a.iface, b.iface, "iron", 60), nil, "direct dispatch protects Keep")
+    b.missing_pools = false
+    F.set_stock_policy(f.name, "iron", "keep", "300")
+    local plan = F.send_plan(f.iface, b.key, "iron")
+    F.set_stock_policy(f.name, "iron", "keep", "370")
+    local ship = F.ship(f.iface, a.iface, b.iface, "iron", plan.n)
+    eq(a.held.iron, 370, "stale preview revalidated at dispatch")
+    eq(ship.n, 9, "net cargo after clamped dispatch")
+    eq(F.ship(f.iface, a.iface, cr.iface, "iron", 10), nil, "foreign destination refused")
+    eq(F.ship(f.iface, a.iface, a.iface, "iron", 10), nil, "same store refused")
+    eq(F.ship(f.iface, a.iface, b.iface, "iron", 1.5), nil, "fractional dispatch refused")
+    -- Ordinary consumption is deliberately able to spend a reserve.
+    F.draw(a.iface, F.stock(a.iface), "war", 20, DERPY_MR_FLOWS_KIND.spend, f.name)
+    eq(a.held.iron, 350, "deliberate spending ignores Keep")
+    F.set_stock_policy(f.name, "grain", "keep", "100")
+    eq(F.import_need(F.stock_view(f.iface, a.iface), "grain"), 80, "manual Keep raises Auto goal for that good")
+    F.set_stock_policy(f.name, "grain", "target", "0")
+    eq(F.import_need(F.stock_view(f.iface, a.iface), "grain"), 0, "target zero remains independent of Keep")
+    local rare = F.stock_view(f.iface, a.iface)
+    local max_work = 0
+    for _, w in ipairs(DERPY_MR_FLOWS_WORKS) do
+        if w.rare == "gromril" and F.work_open(f.iface, w) then max_work = math.max(max_work, w.rare_n) end
+    end
+    eq(rare.work_target.gromril or 0, max_work, "rare goal is largest race-open catalogued batch")
+    rare.held.gromril, rare.capacity.gromril = 0, 2
+    eq(F.import_need(rare, "gromril"), math.min(2, max_work), "rare goal clamped by actual capacity")
+    rare.policy.gromril = { target = 1 }
+    eq(F.import_need(rare, "gromril"), 1, "manual rare target")
+    -- Sanitation touches only policy fields, preserving unrelated state.
+    F.book(f.name).stock.bad = { keep = 4 }
+    F.book(f.name).stock.iron.target = -2
+    F.book(f.name).stock.grain.extra = true
+    F.book(f.name).orders = { festival = 20 }
+    SAVED = {}; cm.saving_game_callbacks[1]({}); cm.loading_game_callbacks[1]({})
+    eq(F.stock_policy(f.name, "grain").target, 0, "zero survives save/load")
+    eq(F.stock_policy(f.name, "iron").target, nil, "invalid loaded number discarded")
+    eq(F.book(f.name).stock.bad, nil, "unknown loaded good discarded")
+    eq(F.book(f.name).orders.festival, 20, "other saved fields retained")
+    F.request(f.name, "stock", "iron", "keep", "auto")
+    eq(F.book(f.name).stock.iron, nil, "Auto removes empty per-good record")
+    local policy = F.stock_policy(f.name, "grain"); policy.keep = 99
+    eq(F.stock_policy(f.name, "grain").keep, 100, "policy reads return copies")
+    whole(F.state, "stock_target_state")
+    -- Different foods and partners must share the same removable category surplus.
+    F.state.rates.trade = 25
+    local p1, p2 = faction("policy_partner_a", { human = true }), faction("policy_partner_b", { human = true })
+    local r1, r2 = region("policy_pa", 80300, 0, 400, {}), region("policy_pb", 80400, 0, 400, {})
+    own(p1, r1, true); own(p2, r2, true)
+    f.partners = { p2, p1 }
+    a.held, b.held = { grain = 35, salted_fish = 15 }, {}
+    F.set_stock_policy(f.name, "grain", "keep", "auto")
+    F.set_stock_policy(f.name, "grain", "target", "auto")
+    F.trade(f.iface)
+    eq(F.use_total(F.stock(a.iface), "provisions") >= 30, true, "foods and partners cannot double-spend shared reserve")
+    local first = (r1.held.grain or 0) + (r1.held.salted_fish or 0)
+    local second = (r2.held.grain or 0) + (r2.held.salted_fish or 0)
+    eq(first >= second, true, "partners allocated by faction key")
+    -- Partial incoming quantities permit another cart, enough incoming suppresses one.
+    F.state.ships = {}
+    a.held, b.held = { timber = 0 }, { timber = 100 }
+    supply.materials, supply.standing = true, true
+    F.state.ships = { { id = "partial", f = f.name, stem = "marble", n = 5, to = a.key, due = TURN + 2 } }
+    F.standing(f.iface, { capital = a.iface, regions = { a.iface, b.iface } }, supply, 4)
+    eq(#F.state.ships, 2, "partial cart does not block further demand")
+    eq(F.state.ships[2].n, 35, "standing target subtracts net incoming across goods")
+    local debit = 100 - b.held.timber
+    eq(debit, F.state.ships[2].n + F.lost(debit), "dispatch debit equals cargo plus loss")
+    F.standing(f.iface, { capital = a.iface, regions = { a.iface, b.iface } }, supply, 4)
+    eq(#F.state.ships, 2, "enough incoming prevents duplicate")
+    -- One source pool walk regardless of the number of goods and partners.
+    local big = faction("policy_large")
+    for i = 1, 100 do
+        local r = region("policy_large_" .. i, 81000 + i, 0, 600, { coal = 500, grain = 500 })
+        own(big, r, i == 1)
+    end
+    local q1, q2 = faction("policy_large_p1"), faction("policy_large_p2")
+    local qr1, qr2 = region("policy_large_p1r", 82000, 0, 600, {}), region("policy_large_p2r", 82100, 0, 600, {})
+    own(q1, qr1, true); own(q2, qr2, true)
+    big.partners = { q1, q2 }
+    local clock = os.clock(); F.trade(big.iface); local elapsed = os.clock() - clock
+    local walks = 0
+    for _, r in ipairs(big.regions) do walks = walks + (r.pool_walks or 0) end
+    eq(walks, 100, "source pools scanned once, not per good or partner")
+    local reads = 0
+    for _, r in ipairs(big.regions) do reads = reads + (r.pool_reads or 0); r.pool_walks = 0 end
+    print(string.format("stock allocation: 100 sources / 2 partners, %d source walks + %d direct reads, %.6fs", walks, reads, elapsed))
+    local q3 = faction("policy_large_p3"); own(q3, region("policy_large_p3r", 82200, 0, 600, {}), true)
+    big.partners[#big.partners + 1] = q3
+    F.state.rates.ai = false
+    F.trade(big.iface); walks = 0
+    for _, r in ipairs(big.regions) do walks = walks + r.pool_walks end
+    eq(walks, 0, "other factions off skips AI-to-AI allocation")
+    F.state.rates.ai = true
+    F.trade(big.iface); walks = 0
+    for _, r in ipairs(big.regions) do walks = walks + r.pool_walks end
+    eq(walks, 100, "adding partner does not rescan source pools per good")
+    F.state, TURN = old_state, old_turn
+end)()
+-- Local paid production and sustained services: no passive output is replaced.
+;(function()
+    local previous, turn = F.state, TURN
+    F.state = { factions = {}, rates = F.read_rates() }; TURN = 60000
+    local f = faction("economy_dwarf", { human = true, sc = "wh_main_sc_dwf_dwarfs" })
+    local r = region("economy_hold", 90000, 0, 400, { grain = 200, beer = 20, pipeweed = 20 })
+    own(f, r, true)
+    local building = { name = function() return "wh_main_dwf_tavern_1" end,
+        percent_health = function() return r.health or 100 end }
+    r.iface.slot_list = function() return list({ { has_building = function() return true end,
+        building = function() return building end } }) end
+    eq(type(F.economy_toggle), "function", "economy model exists")
+    eq(F.economy_book(r.key, false), nil, "preview does not create orders")
+    F.economy_toggle(f.iface, r.key, "brew")
+    eq(F.economy_book(r.key, false).orders.brew, true, "processing enabled without producing")
+    eq(r.held.beer, 20, "toggle produces nothing")
+    F.economy_turn(f.iface)
+    eq(r.held.grain, 188, "batch takes local grain")
+    eq(r.held.beer, 28, "batch gives local beer")
+    F.economy_turn(f.iface)
+    eq(r.held.beer, 28, "repeated turn cannot duplicate output")
+    TURN = TURN + 1; r.health = 90; F.economy_turn(f.iface)
+    eq(r.held.grain, 188, "damaged brewery pauses")
+    TURN = TURN + 1; r.health = 100; r.held.beer = 397
+    local writes = #LOG; F.economy_turn(f.iface)
+    eq(r.held.grain, 188, "full output refuses all inputs")
+    eq(#LOG, writes, "full output performs no transactions")
+    TURN = TURN + 1; r.held.beer = 10; r.held.grain = 0
+    writes = #LOG; F.economy_turn(f.iface)
+    eq(r.held.beer, 10, "missing inputs give no output")
+    eq(#LOG, writes, "missing inputs perform no transactions")
+    F.economy_toggle(f.iface, r.key, "brew")
+    F.economy_toggle(f.iface, r.key, "halls")
+    TURN = TURN + 1; r.held = { grain = 100, beer = 8, pipeweed = 2 }
+    F.economy_turn(f.iface)
+    eq(r.held.beer, 4, "service takes named beer")
+    eq(r.held.pipeweed, 1, "service takes complete second input")
+    eq(r.iface:has_effect_bundle("derpy_mr_service_halls"), true, "paid service applies benefit")
+    F.economy_turn(f.iface); eq(r.held.beer, 4, "service cannot charge twice")
+    TURN = TURN + 1; r.held.pipeweed = 0; F.economy_turn(f.iface)
+    eq(r.held.beer, 4, "missing basket member charges nothing")
+    eq(r.iface:has_effect_bundle("derpy_mr_service_halls"), false, "unpaid service loses benefit")
+    eq(F.economy_book(r.key, false).orders.halls, true, "unpaid service remains enabled")
+    local view = F.stock_view(f.iface, r.iface)
+    eq(view.recurring.named.beer, 4, "named demand is forecast")
+    eq(F.import_need(view, "beer") >= 36, true, "named target cannot be satisfied with grain")
+    F.set_stock_policy(f.name, "beer", "target", 0)
+    eq(F.import_need(F.stock_view(f.iface, r.iface), "beer"), 0, "explicit target still wins")
+    F.economy_toggle(f.iface, r.key, "halls")
+    eq(r.iface:has_effect_bundle("derpy_mr_service_halls"), false, "disable removes service immediately")
+    -- Failed second transaction must restore the first input and produce no output.
+    F.economy_toggle(f.iface, r.key, "brew"); TURN = TURN + 1
+    r.held = { grain = 200, beer = 20 }
+    local transaction = cm.entity_add_pooled_resource_transaction
+    cm.entity_add_pooled_resource_transaction = function(self, e, key, n)
+        if n > 0 and string.find(key, "beer") then error("injected output failure") end
+        return transaction(self, e, key, n)
+    end
+    F.economy_turn(f.iface)
+    cm.entity_add_pooled_resource_transaction = transaction
+    eq(r.held.grain, 200, "transaction failure restores inputs")
+    eq(r.held.beer, 20, "transaction failure gives no output")
+    local foreign = faction("economy_invader", { human = true })
+    own(foreign, r, true); F.on_region_change(r.iface)
+    eq(F.economy_book(r.key, false), nil, "capture clears former orders")
+    -- Every definition runs against its real generated building keys and named basket.
+    for _, key in ipairs({ "brew", "powder", "preserve", "print", "weave", "halls", "records", "tea", "feasts", "archives", "mess", "bake", "tan", "cloth", "toolmaking", "builders", "hospital" }) do
+        TURN = TURN + 1
+        local d = DERPY_MR_FLOWS_ECONOMY[key]
+        assert(d, "missing economy content: " .. key)
+        local race = ({ brew = "dwf", powder = "dwf", preserve = "ogr", print = "emp", weave = "cth",
+            halls = "dwf", records = "emp", tea = "cth", feasts = "brt", archives = "hef", mess = "chd", bake="dwf", tan="ogr", cloth="emp", toolmaking="dwf", builders="dwf", hospital="emp" })[key]
+        local who = faction("recipe_" .. key, { human = true, sc = "wh_main_sc_" .. race .. "_test" })
+        local rr = region("recipe_region_" .. key, 90100, 0, 1000, { grain = 600, timber = 600 })
+        own(who, rr, true)
+        for stem in pairs(d.cost) do rr.held[stem] = 600 end
+        if d.output then rr.held[d.output[1]] = 0 end
+        local bk = d.levels and next(d.levels)
+        rr.iface.slot_list = function() return list(bk and { {
+            has_building = function() return true end,
+            building = function() return { name = function() return bk end,
+                percent_health = function() return 100 end } end } } or {}) end
+        local before = {}; for stem, n in pairs(rr.held) do before[stem] = n end
+        F.request(who.name, "economy", rr.key, key)
+        eq(F.economy_book(rr.key, false).orders[key], true, key .. " synchronized door enables")
+        local snap = F.economy_book(rr.key, false)
+        F.economy_rows(who.iface, rr.iface)
+        eq(F.economy_book(rr.key, false), snap, key .. " preview preserves book identity")
+        F.economy_turn(who.iface)
+        for stem, n in pairs(d.cost) do eq(rr.held[stem], before[stem] - n, key .. " exact input " .. stem) end
+        if d.output then eq(rr.held[d.output[1]], d.output[2], key .. " exact output")
+        else eq(rr.iface:has_effect_bundle(d.bundle), true, key .. " actual bundle") end
+        -- Real save callbacks round-trip the order and duplicate-turn stamp.
+        SAVED = {}; cm.saving_game_callbacks[1]({}); F.state = {}; cm.loading_game_callbacks[1]({})
+        local paid = {}; for stem, n in pairs(rr.held) do paid[stem] = n end
+        F.economy_turn(who.iface)
+        for stem, n in pairs(paid) do eq(rr.held[stem], n, key .. " save/reload cannot charge again") end
+        for missing in pairs(d.cost) do
+            TURN = TURN + 1
+            rr.held[missing] = 0
+            local writes = #LOG
+            F.economy_turn(who.iface)
+            eq(#LOG, writes, key .. " missing " .. missing .. " refuses before any debit")
+            for stem, n in pairs(paid) do
+                if stem ~= missing then eq(rr.held[stem], n, key .. " other inputs untouched") end
+                rr.held[stem] = n
+            end
+        end
+        local other = faction("recipe_other_" .. key, { human = true })
+        F.request(other.name, "economy", rr.key, key)
+        eq(F.economy_book(rr.key, false).orders[key], true, key .. " foreign request refused")
+        F.state.rates.actions = false
+        F.request(who.name, "economy", rr.key, key)
+        eq(F.economy_book(rr.key, false).orders[key], true, key .. " actions off blocks toggle")
+        F.state.rates.actions = true
+        F.request(who.name, "economy", rr.key, "not_a_recipe")
+        eq(F.economy_book(rr.key, false).orders.not_a_recipe, nil, "unknown recipe refused")
+        TURN = TURN + 1; F.state.rates[d.kind] = false
+        F.economy_turn(who.iface)
+        for stem, n in pairs(paid) do eq(rr.held[stem], n, key .. " campaign switch prevents payment") end
+        if d.bundle then eq(rr.iface:has_effect_bundle(d.bundle), false, key .. " switch removes benefit") end
+        F.state.rates[d.kind] = true
+    end
+    for race, level in pairs({ emp = "wh_main_emp_industry_basic_1", brt = "wh_main_brt_farm_extra_1" }) do
+        TURN = TURN + 1
+        local who = faction("brewer_" .. race, { human = true, sc = "wh_main_sc_" .. race .. "_test" })
+        local rr = region("brewery_" .. race, 90150, 0, 1000, { grain = 600, beer = 0 })
+        own(who, rr, true)
+        rr.iface.slot_list = function() return list({ { has_building = function() return true end,
+            building = function() return { name = function() return level end,
+                percent_health = function() return 100 end } end } }) end
+        F.request(who.name, "economy", rr.key, "brew")
+        assert(F.economy_book(rr.key, false), race .. " brewery must be eligible")
+        F.economy_turn(who.iface)
+        eq(rr.held.grain, 588, race .. " brewing charges grain")
+        eq(rr.held.beer, 8, race .. " brewing produces beer")
+    end
+    -- Services preserve survival stock and never run in a minor settlement.
+    TURN = TURN + 1; own(f, r, true); r.held = { beer = 4, pipeweed = 1 }
+    F.economy_toggle(f.iface, r.key, "halls"); F.economy_turn(f.iface)
+    eq(r.held.beer, 4, "service cannot consume essential food reserve")
+    F.economy_clear(r.iface)
+    local minor = region("economy_minor", 90200, 0, 400, { grain = 100, beer = 20, pipeweed = 20 })
+    own(f, minor, false); minor.capital = r
+    F.economy_toggle(f.iface, minor.key, "halls")
+    eq(F.economy_book(minor.key, false), nil, "minor cannot enable province service")
+    -- Auto Keep protects named inputs even when substitutes fill the category.
+    r.held = { grain = 200, beer = 3, pipeweed = 20 }
+    F.economy_toggle(f.iface, r.key, "halls")
+    eq(F.available_stock(F.stock_view(f.iface, r.iface), "beer"), 0, "named beer kept despite abundant grain")
+    F.set_stock_policy(f.name, "beer", "keep", 0)
+    eq(F.available_stock(F.stock_view(f.iface, r.iface), "beer"), 3, "explicit Keep overrides named reserve")
+    -- Both machines receive a request; a UI click alone cannot mutate multiplayer orders.
+    F.economy_clear(r.iface); MP = true
+    F.request(f.name, "economy", r.key, "halls")
+    eq(F.economy_book(r.key, false), nil, "multiplayer request waits for synchronized dispatch")
+    MP = false
+    -- AI buys the same service only with two baskets above survival reserves.
+    local ai = faction("economy_ai", { sc = "wh_main_sc_dwf_dwarfs" })
+    local ar = region("economy_ai_capital", 90300, 0, 400, { grain = 100, beer = 8, pipeweed = 2 })
+    own(ai, ar, true); TURN = TURN + 1; F.economy_turn(ai.iface)
+    eq(ar.held.beer, 4, "AI pays same service bill")
+    eq(ar.held.pipeweed, 1, "AI pays named second input")
+    TURN = TURN + 1; F.economy_turn(ai.iface)
+    eq(ar.held.beer, 4, "AI pauses below two-basket budget")
+    local brewer = faction("economy_ai_brewer", { sc = "wh_main_sc_dwf_dwarfs" })
+    local br = region("economy_ai_brewery", 90400, 0, 400, { grain = 250, beer = 0 })
+    own(brewer, br, true); br.iface.slot_list = r.iface.slot_list
+    TURN = TURN + 1; F.economy_turn(brewer.iface)
+    eq(br.held.beer, 8, "AI processes a missing named output despite category substitutes")
+    eq(br.held.grain, 238, "AI production has no free inputs")
+    F.book(brewer.name).stock = { beer = { target = 0 } } -- retained policy if a human faction becomes AI
+    TURN = TURN + 1; F.economy_turn(brewer.iface)
+    eq(br.held.grain, 238, "zero output target pauses AI processing")
+    F.state.rates.ai = false; TURN = TURN + 1; ar.held.beer = 20; ar.held.pipeweed = 10
+    F.economy_turn(ai.iface); eq(ar.held.beer, 20, "AI master switch honored")
+    print("economy: 9 recipes, 8 services, refusal/rollback, reserves, save/reload, requests and AI budgets pass")
+    F.state, TURN = previous, turn
+end)()
+
+;(function()
+    local old, turn, lookup = F.state, TURN, cm.get_military_force_by_cqi
+    local f = faction("army_food", {human=true})
+    local r = region("army_food_home", 0, 0, 1000, {grain=100})
+    own(f,r,true)
+    local forces = {}
+    local function force(id,n)
+        F.state.army_issued=F.state.army_issued or {};F.state.army_issued[tostring(id)]=true
+        local a = {n=n, r=r, sea=false, owner=f}
+        local ch = {is_at_sea=function() return a.sea end, has_region=function() return a.r~=nil end,
+            region=function() return a.r and a.r.iface or NULL end}
+        a.iface = {is_null_interface=function() return false end, command_queue_index=function() return id end,
+            faction=function() return a.owner.iface end, has_general=function() return true end,
+            is_armed_citizenry=function() return a.garrison==true end, general_character=function() return ch end,
+            unit_list=function() local t={} for i=1,a.n do t[i]={} end return list(t) end}
+        forces[id]=a; f.armies[#f.armies+1]=a.iface
+        return a
+    end
+    cm.get_military_force_by_cqi=function(_,id) return forces[id] and forces[id].iface or false end
+    local message = cm.show_message_event
+    cm.show_message_event=function() end
+    local remove = cm.remove_effect_bundle_from_force
+    cm.remove_effect_bundle_from_force=function() end
+    F.state={factions={},rates=F.read_rates()}; F.state.rates.army_provisions=true
+    local a=force(801,20)
+    local sc=f.iface.subculture
+    for _, subculture in ipairs({"wh_main_sc_vmp_vampire_counts","wh2_dlc11_sc_cst_vampire_coast"}) do
+        f.iface.subculture=function() return subculture end
+        eq(F.uses_stores(f.iface),true,"undead keep trading stores")
+        eq(#F.provision_rows(f.iface),0,"undead do not eat army meals")
+        eq(F.recurring_use(f.iface,r.iface).provisions,nil,"undead forecast has no meals")
+        local held=r.held.grain
+        F.upkeep(f.iface);eq(r.held.grain,held,"undead settlement keeps provisions")
+        F.state.armies={["801"]={f=f.name,goods={},short=3,auto=true}}
+        F.provisions_turn(f.iface);eq(F.state.armies["801"],nil,"undead legacy penalty retires")
+    end
+    f.iface.subculture=sc; F.state.armies=nil
+    TURN=301
+    local demand=F.stock_view(f.iface,r.iface)
+    eq(demand.recurring.provisions,7,"local army meal enters forecast")
+    eq(demand.auto_keep.provisions,35,"exports retain settlement and army meals")
+    eq(demand.auto_target.provisions,70,"imports target settlement and army meals")
+    eq(F.available_stock(demand,"grain"),65,"army reserve protects exports")
+    eq(F.state.armies,nil,"demand preview creates no cargo record")
+    local extra=force(804,4)
+    eq(F.recurring_use(f.iface,r.iface).provisions,8,"two local armies contribute independently")
+    extra.garrison=true
+    eq(F.recurring_use(f.iface,r.iface).provisions,7,"garrison does not solicit relief")
+    a.sea=true
+    eq(F.recurring_use(f.iface,r.iface).provisions,2,"sea army creates no fictitious local demand")
+    a.sea=false
+    eq(#F.provision_rows(f.iface),1,"army preview finds force")
+    eq(F.state.armies,nil,"army preview does not migrate")
+    r.held.grain=35
+    F.provision_action(f.iface,"801","load")
+    eq(F.provision_total(F.state.armies["801"]),25,"loading releases army reserve but retains essential ten")
+    eq(r.held.grain,10,"loading retains essential reserve")
+    r.held.grain=100; F.state.armies=nil
+    F.set_stock_policy(f.name,"grain","keep",90)
+    F.provision_action(f.iface,"801","load")
+    eq(F.provision_total(F.state.armies["801"]),10,"army reserve release still honors explicit Keep")
+    eq(r.held.grain,90,"explicit Keep remains in settlement")
+    F.set_stock_policy(f.name,"grain","keep","auto")
+    r.held.grain=100; F.state.armies=nil
+    local economy_named=F.economy_named
+    F.economy_named=function() return {grain=12} end
+    r.held.grain=90
+    F.provision_action(f.iface,"801","load")
+    eq(F.provision_total(F.state.armies["801"]),20,"loading retains enabled named-input reserve")
+    eq(r.held.grain,70,"settlement and named demand remain protected")
+    F.economy_named=economy_named
+    r.held.grain=100; F.state.armies=nil
+    F.provisions_turn(f.iface)
+    local b=F.state.armies["801"]
+    eq(F.provision_total(b),25,"five turns after meal")
+    eq(r.held.grain,70,"only loaded goods leave settlement")
+    eq(b.short,0,"meal covered")
+    F.provisions_turn(f.iface)
+    eq(r.held.grain,70,"duplicate turn no debit")
+    F.provision_action(f.iface,"801","unload")
+    eq(r.held.grain,95,"unload returns exact unconsumed goods")
+    eq(F.provision_total(b),0,"unload empties cargo")
+    eq(b.auto,false,"unload pauses refill")
+    a.sea=true
+    F.provision_action(f.iface,"801","load")
+    eq(F.provision_total(b),10,"sea Load buys capped field supplies")
+    eq(r.held.grain,95,"sea purchase never accesses settlement stores")
+    b.goods={} -- Exhaust the purchased batch to exercise shortage stages.
+    TURN=302; F.provisions_turn(f.iface); eq(b.short,1,"first shortage")
+    TURN=303; F.provisions_turn(f.iface); eq(b.short,2,"second shortage")
+    eq(FORCE_BUNDLES[#FORCE_BUNDLES][1],"derpy_mr_army_hungry","second shortage movement penalty")
+    TURN=304; F.provisions_turn(f.iface); eq(b.short,3,"third shortage")
+    eq(FORCE_BUNDLES[#FORCE_BUNDLES][1],"derpy_mr_army_starved","third shortage full penalty")
+    eq(r.held.grain,95,"sea cannot load")
+    a.sea=false; a.n=4
+    F.provision_action(f.iface,"801","load"); eq(F.provision_total(b),5,"manual load target")
+    TURN=305; F.provisions_turn(f.iface); eq(b.short,0,"full meal recovers")
+    eq(F.provision_total(b),4,"manual load does not enable auto")
+    a.n=1; b.goods.grain=50
+    F.provision_action(f.iface,"801","load"); eq(F.provision_total(b),50,"downsizing preserves excess")
+    a.r=nil; F.provision_action(f.iface,"801","unload"); eq(F.provision_total(b),50,"no region no unload")
+    a.r=r; r.siege=true; F.provision_action(f.iface,"801","unload"); eq(F.provision_total(b),50,"siege no unload")
+    r.siege=false
+    local other=faction("army_food_other")
+    a.owner=other; TURN=306; F.provisions_turn(other.iface)
+    eq(F.state.armies["801"],nil,"owner change retires cargo")
+    a.owner=f; forces[801]=nil; f.armies={}; F.provisions_turn(f.iface)
+    eq(F.state.armies["801"],nil,"destroyed force stays retired")
+    f.armies={}; local c=force(802,4)
+    r.held={grain=100,beer=20}; F.state.armies={}; F.state.stock=nil
+    F.state.stock = nil
+    local original_available=F.available_stock
+    F.available_stock=function(v,stem) if stem=="grain" then return math.max(0,(v.held.grain or 0)-99) end return 0 end
+    TURN=307; F.provisions_turn(f.iface)
+    eq(r.held.grain,99,"refill respects reserve")
+    eq(F.provision_total(F.state.armies["802"]),0,"partial meal consumed only paid stock")
+    eq(F.state.armies["802"].short,0,"one-unit meal succeeds")
+    F.available_stock=original_available
+    local saved_before=SAVED
+    SAVED={}; cm.saving_game_callbacks[1]({}); F.state={}; cm.loading_game_callbacks[1]({})
+    local held=r.held.grain
+    F.provisions_turn(f.iface); eq(r.held.grain,held,"reload prevents second meal")
+    SAVED=saved_before
+    local cb=F.state.armies["802"]
+    cb.auto=false; cb.goods={beer=7}; c.n=40
+    eq(F.provision_rows(f.iface)[1].need,10,"unit transfers change need")
+    eq(F.provision_total(cb),7,"unit transfers mint no cargo")
+    F.provision_action(f.iface,"802","unload")
+    eq(r.held.beer,27,"unload preserves original good")
+    r.held.grain=200; r.held.beer=0
+    local transaction=cm.entity_add_pooled_resource_transaction
+    cm.entity_add_pooled_resource_transaction=function() end
+    F.provision_action(f.iface,"802","load")
+    eq(F.provision_total(cb),0,"failed native debit creates no cargo")
+    cm.entity_add_pooled_resource_transaction=transaction
+    local balance=r.held.grain
+    F.state.rates.actions=false
+    F.dispatch(f.name,{"provisions","802","load"})
+    eq(r.held.grain,balance,"action switch protects army requests")
+    F.state.rates.actions=true
+    F.dispatch(f.name,{"provisions","802","load","extra"})
+    eq(r.held.grain,balance,"invalid army request arity")
+    F.dispatch(f.name,{"provisions","999","load"})
+    eq(F.state.armies["999"],nil,"request cannot invent force")
+    f.human=false; cb.auto=true; TURN=308
+    F.provisions_turn(f.iface)
+    eq(F.provision_total(cb),50,"AI pays same target")
+    eq(r.held.grain,140,"AI pays native pools")
+    F.state.rates.ai=false
+    eq(#F.provision_rows(f.iface),0,"AI switch hides disabled army logistics")
+    TURN=309; F.provisions_turn(f.iface)
+    eq(r.held.grain,140,"AI switch prevents debit")
+    eq(F.state.armies["802"],nil,"AI switch removes penalties and cargo book")
+    F.state.rates.ai=true
+    local d=force(803,4); d.garrison=true
+    eq(#F.provision_rows(f.iface),1,"garrison excluded")
+    d.garrison=false; F.state.fight={escort=803}
+    eq(#F.provision_rows(f.iface),1,"temporary escort excluded")
+    F.state.fight=nil
+    F.state.rates.army_provisions=false; TURN=309
+    F.provisions_turn(f.iface)
+    eq(F.state.armies["802"],nil,"disabled mechanic clears records and penalties")
+    -- A remote owned store can recover through paid deliveries, without cargo gifts.
+    F.state.rates.army_provisions=true; F.state.rates.ai=true
+    d.garrison=true; c.n=20; r.held={}
+    local donor=region("army_food_donor",10,0,1000,{grain=200})
+    own(f,donor,false)
+    F.state.armies={ ["802"]={f=f.name,goods={},auto=true,short=3,done=TURN} }
+    F.state.ships={}; F.state.ship_seq=10000
+    F.provision_supply(f.iface)
+    eq(#F.ships(),1,"AI dispatches food to army region")
+    local cart=F.ships()[1]
+    eq(cart.to,r.key,"army relief destination is local store")
+    eq(cart.n,70,"delivery fills ten-meal combined target")
+    eq(donor.held.grain,122,"relief pays gross goods including loss")
+    eq(F.provision_total(F.state.armies["802"]),0,"dispatch grants no immediate army food")
+    F.provision_supply(f.iface)
+    eq(#F.ships(),1,"repeated planning counts committed cargo")
+    TURN=TURN+2; F.ships_turn(f.iface)
+    eq(r.held.grain,70,"paid relief arrives in settlement")
+    F.provisions_turn(f.iface)
+    eq(F.state.armies["802"].short,0,"AI recovers through paid local loading")
+    eq(F.provision_total(F.state.armies["802"]),25,"recovery retains five carried meals")
+    eq(r.held.grain,40,"army consumes reserve intended for itself")
+    local function food_total()
+        local n=(r.held.grain or 0)+(donor.held.grain or 0)+F.provision_total(F.state.armies["802"])
+        for _, s in ipairs(F.ships()) do n=n+s.n end
+        return n
+    end
+    for cycle=1,12 do
+        local before=food_total()
+        donor.held.grain=donor.held.grain+12
+        TURN=TURN+1; F.ships_turn(f.iface); F.upkeep(f.iface); F.provisions_turn(f.iface)
+        local paid=donor.held.grain
+        F.provision_supply(f.iface)
+        local gross=paid-donor.held.grain
+        eq(food_total(),before+12-4-5-F.lost(gross),"relief conservation cycle "..cycle)
+        eq(F.state.armies["802"].short,0,"sustained paid recovery cycle "..cycle)
+    end
+    F.state.armies["802"].auto=false
+    eq(F.recurring_use(f.iface,r.iface).provisions,2,"paused Auto does not solicit deliveries")
+    F.state.armies["802"].auto=true
+    while #F.ships()>0 do F.drop(F.ships()[1]) end
+    r.held={}; donor.held.grain=200
+    F.book(f.name).stop={export={grain=true}}
+    F.provision_supply(f.iface)
+    eq(#F.ships(),0,"relief respects export hold")
+    F.book(f.name).stop={import={grain=true}}
+    F.provision_supply(f.iface)
+    eq(#F.ships(),0,"relief respects import hold")
+    F.book(f.name).stop={}
+    F.state.rates.ai=false
+    F.provision_supply(f.iface)
+    eq(#F.ships(),0,"AI switch blocks relief dispatch")
+    -- Field purchases cannot bypass ordinary land supply or mint unpaid cargo.
+    F.state.rates.ai=true;f.human=true;c.n=20;c.sea=false;c.r=r
+    F.state.armies={};TURN=900
+    eq(F.provision_rows(f.iface)[1].mobile,false,"settled land army has no field vendor")
+    c.r=donor;local owner=donor.owner;donor.owner=other
+    eq(F.provision_rows(f.iface)[1].mobile,false,"foreign land does not offer field vendor to settled faction")
+    donor.owner=owner;c.r=r
+    c.sea=true
+    local row=F.provision_rows(f.iface)[1]
+    eq(row.buy,10,"field purchase quote is two meals")
+    eq(row.price,100,"field quote exposes actual price")
+    local gold=f.iface:treasury()
+    F.provisions_turn(f.iface)
+    eq(f.iface:treasury(),gold,"human Auto never buys field rations")
+    F.provision_action(f.iface,"802","load")
+    local mobile=F.state.armies["802"]
+    eq(F.provision_total(mobile),10,"manual field purchase fills only two meals")
+    eq(mobile.goods.salted_fish,10,"sea purchase records actual provision good")
+    eq(f.iface:treasury(),gold-100,"field cargo has verified gold payment")
+    F.provision_action(f.iface,"802","load")
+    eq(f.iface:treasury(),gold-100,"duplicate field request charges once")
+    mobile.goods={};F.provision_action(f.iface,"802","load")
+    eq(F.provision_total(mobile),0,"same-turn spent cargo cannot reset purchase limit")
+    local save=SAVED;SAVED={};cm.saving_game_callbacks[1]({});F.state={};cm.loading_game_callbacks[1]({})
+    mobile=F.state.armies["802"];F.provision_action(f.iface,"802","load")
+    eq(F.provision_total(mobile),0,"saved purchase limit survives reload");SAVED=save
+    TURN=901
+    local goldwrite=cm.treasury_mod;cm.treasury_mod=function() end
+    F.provision_action(f.iface,"802","load")
+    eq(F.provision_total(mobile),0,"failed gold debit creates no field rations")
+    cm.treasury_mod=goldwrite
+    local treasury=TREASURY[f.name];TREASURY[f.name]=-99995
+    F.provision_action(f.iface,"802","load")
+    eq(F.provision_total(mobile),0,"insufficient gold cannot buy fractional rations")
+    TREASURY[f.name]=treasury
+    c.sea=false;local regions=f.regions;f.regions={};c.r=nil
+    eq(F.provision_rows(f.iface)[1].mobile,true,"homeless horde can buy supplies on land")
+    F.provision_action(f.iface,"802","load")
+    eq(mobile.goods.salted_meat,10,"land purchase records meat")
+    f.regions=regions;c.r=r;c.sea=true;f.human=false;TURN=902;mobile.goods={};mobile.auto=true
+    gold=f.iface:treasury();F.provisions_turn(f.iface)
+    eq(F.provision_total(mobile),5,"AI buys same two meals then eats one")
+    eq(f.iface:treasury(),gold-100,"AI pays identical field price")
+    F.provisions_turn(f.iface);eq(f.iface:treasury(),gold-100,"AI duplicate owner turn is safe")
+    f.human=true;c.garrison=true
+    local fresh=force(805,20);F.state.army_issued["805"]=nil
+    local stock,gold=r.held.grain,f.iface:treasury()
+    F.provision_seed_force(fresh.iface)
+    local issued=F.state.armies["805"]
+    eq(F.provision_total(issued),25,"new army starts exactly half full")
+    eq(issued.goods.hardtack,25,"human starter uses campaign biscuits")
+    eq(issued.done,TURN,"starter army first eats next owner turn")
+    F.provisions_turn(f.iface)
+    eq(F.provision_total(issued),25,"creation turn does not eat or top up starter cargo")
+    eq(r.held.grain,stock,"starter grant does not debit protected stores")
+    eq(f.iface:treasury(),gold,"starter grant is not a surprise purchase")
+    issued.goods={};F.provision_seed_force(fresh.iface)
+    eq(F.provision_total(issued),0,"exhausted cargo never gets another starter grant")
+    local prior_save=SAVED;SAVED={};cm.saving_game_callbacks[1]({});F.state={};cm.loading_game_callbacks[1]({})
+    F.provision_seed_force(fresh.iface)
+    eq(F.provision_total(F.state.armies["805"]),0,"reload never refills starter cargo");SAVED=prior_save
+    F.provision_clear("805");F.provision_seed_force(fresh.iface)
+    eq(F.provision_total(F.state.armies["805"]),0,"retired ledger cannot repeat starter grant")
+    F.state.army_issued=nil
+    prior_save=SAVED;SAVED={};cm.saving_game_callbacks[1]({});F.state={};cm.loading_game_callbacks[1]({})
+    F.provision_clear("805");F.provision_seed_force(fresh.iface)
+    eq(F.provision_total(F.state.armies["805"]),0,"legacy ledgers migrate before retirement");SAVED=prior_save
+    local cb=cm.callback;cm.callback=function(_,fn) fn() end
+    local created=force(808,12);F.state.army_issued["808"]=nil
+    fire("MilitaryForceCreated",{military_force_created=function() return created.iface end})
+    eq(F.provision_total(F.state.armies["808"]),15,"force-created event seeds half cargo")
+    F.state.armies["808"].goods={}
+    fire("MilitaryForceCreated",{military_force_created=function() return created.iface end})
+    eq(F.provision_total(F.state.armies["808"]),0,"duplicate creation event cannot refill")
+    cm.callback=cb
+    local living=f.iface.subculture
+    f.iface.subculture=function() return "wh3_dlc23_sc_chd_chaos_dwarfs" end
+    local hungry=force(806,8);F.state.army_issued["806"]=nil
+    F.provision_seed_force(hungry.iface)
+    eq(F.state.armies["806"].goods.salted_meat,10,"Chaos Dwarf starter uses preserved meat")
+    f.iface.subculture=function() return "wh_main_sc_vmp_vampire_counts" end
+    local dead=force(807,20);F.state.army_issued["807"]=nil
+    F.provision_seed_force(dead.iface);eq(F.state.armies["807"],nil,"undead get no starter rations")
+    f.iface.subculture=living
+    cm.show_message_event=message
+    F.state,TURN,cm.get_military_force_by_cqi,cm.remove_effect_bundle_from_force=old,turn,lookup,remove
+end)()
+;(function()
+    F.route_turns = distance_turns
+    local saved, turn = F.state, TURN
+    F.state = { factions = {}, rates = F.read_rates(), ship_seq = 90000 }
+    F.state.rates.upkeep, F.state.rates.supply, F.state.rates.army_provisions = false, false, false
+    F.state.rates.escort = false
+    TURN = 100000
+    local buyer = faction("route_buyer", { human = true, gold = 10000 })
+    local seller = faction("route_seller", { gold = 10000 })
+    local a = region("route_a",0,0,1000,{grain=500})
+    local b = region("route_b",80,0,1000,{})
+    local c = region("route_c",400,0,1000,{grain=500})
+    own(buyer,a,true); own(buyer,b); own(seller,c,true)
+    buyer.partners={seller}; seller.partners={buyer}
+    eq(F.route_turns(a.iface,b.iface),2,"coordinate duration")
+    b.x=1; eq(F.route_turns(a.iface,b.iface),1,"minimum travel")
+    eq(F.route_turns(a.iface,c.iface),6,"maximum travel")
+    b.x=80
+    local runtime = DERPY_MR_TERRAIN_ROUTES
+    local road = {{0,0},{0,20},{40,20},{80,20},{80,0}}
+    DERPY_MR_TERRAIN_ROUTES = {journey=function() return road end}
+    local s=F.ship(buyer.iface,a.iface,b.iface,"grain",400)
+    eq(s.road,road,"new shipment saves its solved road")
+    eq(s.x,0,"cargo starts on the road"); eq(s.y,0,"cargo starts at its first point")
+    DERPY_MR_TERRAIN_ROUTES = runtime
+    eq(s.gross,100,"gross cart cap"); eq(s.n,90,"net capped cargo")
+    eq(a.held.grain,400,"actual capped source debit")
+    F.state=copy(F.state); s=F.ships()[1]
+    eq(s.road[3][2],20,"saved road survives reload")
+    TURN=s.due-1; F.ship_step(buyer.iface,s,TURN); eq(b.held.grain or 0,0,"not before saved due")
+    eq(s.x,40,"cargo advances to the road midpoint"); eq(s.y,20,"cargo stays on its detour")
+    eq(MARKERS[s.id].x,s.x,"interception trigger follows cargo x")
+    eq(MARKERS[s.id].y,s.y,"interception trigger follows cargo y")
+    eq(SCENES[s.id].x,s.x,"caravan scene follows cargo")
+    F.ship_step(buyer.iface,s,TURN); eq(s.x,40,"same-turn step does not advance twice")
+    s.due=TURN+3; TURN=TURN+1; F.ship_step(buyer.iface,s,TURN)
+    eq(F.ship_by_id(s.id),s,"saved due wins over elapsed legacy time")
+    TURN=s.due; F.ship_step(buyer.iface,s,TURN); eq(b.held.grain,90,"arrival on stored due")
+    F.ship_step(buyer.iface,s,TURN); eq(b.held.grain,90,"duplicate arrival cannot mint goods")
+    local old={id="legacy_route",f=buyer.name,stem="grain",n=9,from=a.key,to=b.key,at=TURN,leg=1,x=0,y=0}
+    F.state.ships={old}; TURN=TURN+1; F.ship_step(buyer.iface,old,TURN)
+    eq(F.ship_by_id(old.id),old,"legacy fallback waits two turns")
+    TURN=TURN+1; F.ship_step(buyer.iface,old,TURN); eq(b.held.grain,99,"legacy arrival retained")
+    b.held.grain=0
+    F.set_stock_policy(buyer.name,"grain","keep","390")
+    s=F.ship(buyer.iface,a.iface,b.iface,"grain",100)
+    eq(s.gross,10,"new carts preserve source Keep")
+    F.drop(s); F.set_stock_policy(buyer.name,"grain","keep","auto")
+    local o=F.route_create(buyer.iface,a.key,b.key,"grain",150,50)
+    eq(o~=nil,true,"internal named order created")
+    F.routes_turn(buyer.iface); eq(#F.ships(),1,"recurring internal dispatch")
+    eq(F.ships()[1].gross,50,"order batch cap")
+    F.routes_turn(buyer.iface); eq(#F.ships(),1,"once per order per turn")
+    TURN=TURN+1; F.routes_turn(buyer.iface); eq(#F.ships(),2,"next turn sends toward net target")
+    F.route_control(buyer.iface,o.id,"cancel"); eq(#F.routes(buyer.iface),0,"cancel removes order")
+    while #F.ships()>0 do F.drop(F.ships()[1]) end
+    b.held.grain=0
+    local contract=F.route_create(buyer.iface,c.key,b.key,"grain",70,100)
+    eq(contract.price,DERPY_MR_FLOWS_SELL_RATE.provisions,"ordinary price locked")
+    local bg,sg=buyer.iface:treasury(),seller.iface:treasury()
+    TURN=TURN+1; F.routes_turn(buyer.iface); local cart=F.ships()[1]
+    eq(cart.n,70,"net target after loss")
+    eq(cart.escrow,70*contract.price,"escrow is delivered-unit maximum")
+    eq(buyer.iface:treasury(),bg-cart.escrow,"buyer charged once")
+    eq(seller.iface:treasury(),sg,"seller unpaid before arrival")
+    eq(F.incoming(buyer.name,b.key,"grain"),70,"recipient reservation")
+    eq(F.incoming(seller.name,b.key,"grain"),0,"sender has no recipient reservation")
+    local snapshot=copy(F.state); F.state=copy(snapshot)
+    contract=F.routes(buyer.iface)[1]
+    F.routes_turn(buyer.iface); eq(#F.ships(),1,"reload cannot redispatch same turn")
+    cart=F.ships()[1]; b.held.grain=980; TURN=cart.due
+    F.arrive(buyer.iface,cart)
+    eq(b.held.grain,1000,"partial arrival fits actual free space")
+    eq(seller.iface:treasury(),sg+20*contract.price,"pay only credited cargo")
+    eq(buyer.iface:treasury(),bg-20*contract.price,"refund undelivered units")
+    F.arrive(buyer.iface,cart); F.drop(cart)
+    F.route_settle(cart,20)
+    eq(seller.iface:treasury(),sg+20*contract.price,"settlement idempotent")
+    b.held.grain=0; TURN=TURN+1; F.routes_turn(buyer.iface); cart=F.ships()[1]
+    local charged=buyer.iface:treasury(); local source=c.held.grain
+    war(buyer,seller); TURN=TURN+1; F.ships_turn(buyer.iface)
+    eq(#F.ships(),0,"war returns cargo")
+    eq(c.held.grain,source+cart.n,"return net cargo to seller")
+    eq(buyer.iface:treasury(),charged+cart.escrow,"war refunds escrow")
+    F.routes_turn(buyer.iface); eq(#F.ships(),0,"war stops future dispatch")
+    buyer.war={}; seller.war={}; buyer.partners={seller}; seller.partners={buyer}
+    TURN=TURN+1; F.routes_turn(buyer.iface); cart=F.ships()[1]
+    seller.dead=true; F.sweep()
+    eq(#F.ships(),0,"dead seller settles cargo")
+    eq(buyer.iface:treasury(),bg-20*contract.price,"dead seller refunds live buyer")
+    seller.dead=false
+    contract.price=3 -- Accepted terms stay fixed even if an optional price provider appears later.
+    local ex=EX; EX={sell_price=function() return 9999 end,lot=function() return 1 end,with_player=function(_,fn) fn();return true end}
+    local before=buyer.iface:treasury()
+    b.held.grain=0; TURN=TURN+1
+    F.set_stock_policy(buyer.name,"grain","target","70")
+    F.routes_turn(buyer.iface); cart=F.ships()[1]
+    eq(cart.price,3,"accepted contract price unchanged by Exchange")
+    F.trade(seller.iface); eq(b.held.grain,0,"free trade cannot duplicate committed deficit")
+    F.route_control(buyer.iface,contract.id,"toggle")
+    eq(contract.enabled,false,"pause order")
+    F.route_control(buyer.iface,contract.id,"cancel")
+    eq(buyer.iface:treasury(),before,"cancel refunds full travelling escrow")
+    eq(#F.ships(),0,"cancel returns travelling partner cargo")
+    F.route_control(buyer.iface,contract.id,"cancel")
+    eq(buyer.iface:treasury(),before,"duplicate cancel cannot refund twice")
+    EX=ex
+    contract=F.route_create(buyer.iface,c.key,b.key,"grain",70,100)
+    TURN=TURN+1; F.routes_turn(buyer.iface); cart=F.ships()[1]
+    local captor=faction("route_raider"); local raid=region("route_raid",0,0,1000,{})
+    own(captor,raid,true); before=buyer.iface:treasury()
+    F.seize(cart,captor.iface); eq(raid.held.grain,70,"seizure transfers actual net cargo")
+    eq(buyer.iface:treasury(),before+cart.escrow,"seizure refunds unpaid escrow")
+    F.seize(cart,captor.iface); eq(raid.held.grain,70,"duplicate seizure cannot mint cargo")
+    TURN=TURN+1; F.routes_turn(buyer.iface); cart=F.ships()[1]
+    before=buyer.iface:treasury(); source=c.held.grain
+    lose(buyer,b); own(captor,b); TURN=TURN+1; F.ships_turn(buyer.iface)
+    eq(c.held.grain,source+cart.n,"captured destination returns net cargo")
+    eq(buyer.iface:treasury(),before+cart.escrow,"captured destination refunds buyer")
+    lose(captor,b); own(buyer,b)
+    local transaction=cm.entity_add_pooled_resource_transaction
+    local goldwrite=cm.treasury_mod
+    before=buyer.iface:treasury(); source=c.held.grain
+    cm.entity_add_pooled_resource_transaction=function() end
+    TURN=TURN+1; F.routes_turn(buyer.iface)
+    eq(#F.ships(),0,"failed native goods debit publishes no cargo")
+    eq(buyer.iface:treasury(),before,"failed goods debit restores escrow")
+    cm.entity_add_pooled_resource_transaction=transaction
+    cm.treasury_mod=function() end
+    TURN=TURN+1; F.routes_turn(buyer.iface)
+    eq(#F.ships(),0,"failed native gold debit publishes no cargo")
+    eq(c.held.grain,source,"failed gold debit takes no goods")
+    cm.treasury_mod=goldwrite
+    F.book(seller.name).stop={export={grain=true}}
+    TURN=TURN+1; F.routes_turn(buyer.iface); eq(#F.ships(),0,"seller export hold blocks contract")
+    F.book(seller.name).stop={}; F.book(buyer.name).stop={import={grain=true}}
+    TURN=TURN+1; F.routes_turn(buyer.iface); eq(#F.ships(),0,"buyer import hold blocks contract")
+    F.book(buyer.name).stop={}
+    eq(F.route_create(buyer.iface,c.key,b.key,"grain",70,100),nil,"duplicate order refused")
+    eq(F.route_create(buyer.iface,c.key,b.key,"iron",70,101),nil,"oversized batch refused")
+    eq(F.route_edit(buyer.iface,contract.id,"price","1"),false,"price cannot be edited")
+    eq(F.route_edit(buyer.iface,contract.id,"target","nan"),false,"malformed target refused")
+    eq(F.route_edit(buyer.iface,contract.id,"batch","1"),false,"non-deliverable batch refused")
+    local count=#F.routes(buyer.iface)
+    F.dispatch(buyer.name,{"route_new",a.key,b.key,"iron","100"})
+    eq(#F.routes(buyer.iface),count,"wrong arity refuses route")
+    F.state.rates.actions=false
+    F.dispatch(buyer.name,{"route_new",a.key,b.key,"iron","100","100"})
+    eq(#F.routes(buyer.iface),count,"actions switch blocks creation")
+    F.state.rates.actions=true
+    F.request(buyer.name,"route_new",a.key,b.key,"iron","100","100")
+    eq(#F.routes(buyer.iface),count+1,"synchronized door creates order")
+    local internal=F.routes(buyer.iface)[count+1]
+    eq(F.route_covers(buyer.iface,b.key,"war"),true,"named order replaces standing category")
+    F.route_control(buyer.iface,internal.id,"toggle")
+    eq(F.route_covers(buyer.iface,b.key,"war"),true,"paused order still replaces standing category")
+    a.held.iron=100; b.held.iron=0
+    local p={capital=b.iface,regions={a.iface,b.iface}}
+    local carts=#F.ships()
+    F.standing(buyer.iface,p,{arms=true},4)
+    eq(#F.ships(),carts,"standing dispatcher does not compete with paused named route")
+    MP=true; SENT={}
+    F.request(buyer.name,"route_edit",internal.id,"target","120")
+    eq(internal.target,100,"MP click never directly mutates order")
+    eq(SENT[1][2],"dmr1|route_edit|"..internal.id.."|target|120","MP terms use existing request channel")
+    MP=false
+    TURN=TURN+1; F.routes_turn(buyer.iface); cart=F.ships()[1]
+    buyer.dead=true; before=F.state.contracts.lost
+    F.sweep()
+    eq(F.state.contracts.lost,before+cart.escrow,"dead buyer refund is recorded lost")
+    eq(#F.ships(),0,"dead buyer cargo retired")
+    buyer.dead=false
+    F.book(buyer.name).routes.bad={id="bad",target=-2}
+    F.sanitize_routes(); eq(F.book(buyer.name).routes.bad,nil,"malformed saved order removed")
+    F.state,TURN=saved,turn
+end)()
+
+-- Display previews use the allocator without committing its transactions.
+;(function()
+    local state, reach, ships_to = F.state, F.trade_reach, F.ships_to
+    F.state = {factions={}, rates={trade=5,ai=true}}
+    local seller, buyer, later = faction("visual_seller",{human=true}), faction("visual_buyer"), faction("visual_later")
+    local a, b, c = region("visual_a",0,0,400,{grain=300}), region("visual_b",1,0,200,{grain=0}), region("visual_c",2,0,200,{grain=0})
+    own(seller,a,true); own(buyer,b,true); own(later,c,true)
+    seller.partners={buyer}
+    F.trade_reach=function(_,_,mode) eq(mode,"peek","preview never solves extra roads"); return true end
+    F.set_stock_policy(seller.name,"grain","keep","0")
+    F.set_stock_policy(buyer.name,"grain","target","100")
+    F.set_stock_policy(later.name,"grain","target","100")
+    local transactions=#LOG
+    local function advertises()
+        local goods=F.trade(seller.iface,true)
+        eq(#LOG,transactions,"preview must not transact")
+        for _,stem in ipairs(goods[buyer.name] or {}) do if stem=="grain" then return true end end
+        return false
+    end
+    eq(advertises(),true,"positive flow advertised")
+    eq(a.held.grain,300,"preview keeps sender stock"); eq(b.held.grain,0,"preview keeps receiver stock")
+    b.held.grain=200; eq(advertises(),false,"full recipient has no cargo")
+    b.held.grain=100; eq(advertises(),false,"target met has no cargo")
+    b.held.grain=0; a.held.grain=1; eq(advertises(),false,"rounded zero has no cargo")
+    a.held.grain=300; F.state.rates.trade=0; eq(advertises(),false,"zero rate has no cargo")
+    F.state.rates.trade=5
+    F.set_stock_policy(seller.name,"grain","keep","300"); eq(advertises(),false,"Keep protects cargo")
+    F.set_stock_policy(seller.name,"grain","keep","0")
+    F.toggle(seller.name,"export","grain"); eq(advertises(),false,"stopped export has no cargo")
+    F.toggle(seller.name,"export","grain")
+    F.ships_to=function(f,r) if f==buyer.name and r==b.key then return {{stem="grain",n=100,due=TURN+2}} end return {} end
+    eq(advertises(),false,"incoming cargo already covers target")
+    F.ships_to=ships_to
+    a.held.grain=20; seller.partners={later,buyer}
+    local goods=F.trade(seller.iface,true)
+    eq(goods[buyer.name][1],"grain","first alphabetical partner gets one unit")
+    eq(#(goods[later.name] or {}),0,"later partner cannot reuse surplus below rounding threshold")
+    eq(a.held.grain,20,"ordered preview never debits the real sender")
+    F.trade_reach=function() return true end
+    F.trade(seller.iface)
+    eq(a.held.grain,19,"actual allocation agrees with preview debit")
+    eq(b.held.grain,1,"actual first partner agrees with preview")
+    eq(c.held.grain,0,"actual later partner agrees with preview")
+    F.state,F.trade_reach,F.ships_to=state,reach,ships_to
+end)()
+
 print("harness ok")

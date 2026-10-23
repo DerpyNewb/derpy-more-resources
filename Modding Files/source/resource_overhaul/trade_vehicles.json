@@ -1,0 +1,283 @@
+{
+  "models": {
+    "land_wood": {
+      "pack": "models4.pack",
+      "source": "rigidmodels/campaign/generic_props/resources/gen_wooden_cart.rigid_model_v2",
+      "sea": false,
+      "yaw": 180
+    },
+    "land_dwf": {
+      "pack": "models4.pack",
+      "source": "rigidmodels/campaign/generic_props/mines/gen_minecart.rigid_model_v2",
+      "sea": false
+    },
+    "land_chd": {
+      "pack": "models4.pack",
+      "source": "rigidmodels/campaign/chaos_dwarfs/chd_cart_01.rigid_model_v2",
+      "sea": false,
+      "yaw": 90
+    },
+    "land_cth": {
+      "pack": "models4.pack",
+      "source": "rigidmodels/campaign/cathay/cth_cart_01.rigid_model_v2",
+      "sea": false,
+      "yaw": 90
+    },
+    "land_hef": {
+      "pack": "models4.pack",
+      "source": "rigidmodels/campaign/highelves/hef_wagon.rigid_model_v2",
+      "sea": false,
+      "yaw": 90
+    },
+    "land_def": {
+      "pack": "models4.pack",
+      "source": "rigidmodels/campaign/dark_elves/def_cart_02.rigid_model_v2",
+      "sea": false,
+      "yaw": 180
+    },
+    "land_chs": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/chariots/cam_cch1/chs_marauder_chariot/chs_chariot_01.rigid_model_v2",
+      "sea": false
+    },
+    "land_grn": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/chariots/cam_wlfch1/grn/grn_campaign_wolf_chariot/grn_campaign_wolf_chariot_01.rigid_model_v2",
+      "sea": false
+    },
+    "land_sla": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/chariots/cam_sc1/dae_seeker_chariot_01.rigid_model_v2",
+      "sea": false
+    },
+    "sea_emp": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/lightship01/emp/emp_light_ship/emp_wargalley_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_brt": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/lightship01/brt/brt_light_ship/brt_buccaneer_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_dwf": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/lightship03/dwf/dwf_light_ship/dwf_monitor_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_chd": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/chaosdwarfsship01/chd_agent_ship01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_cth": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/cathayship01/cth_agent_ship.rigid_model_v2",
+      "sea": true
+    },
+    "sea_hef": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/mediumship05/hef/hef_agent_ship.rigid_model_v2",
+      "sea": true
+    },
+    "sea_def": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/lightship05/def_agent_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_wef": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/transportship03/wef/wef_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_lzd": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/transportship04/lzd/lzd_agent_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_skv": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/mediumship06/skv_army_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_tmb": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/agentship04/tmb/tmb_agent/tmb_agent_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_vmp": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/lightship01/vmp/vmp_light_ship/vmp_vargalley_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_cst": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/coastship01/cst_ghost_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_ogr": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/ogreship01/ogr_agent_ship.rigid_model_v2",
+      "sea": true
+    },
+    "sea_ksl": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/kislevship01/ksl_agent_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_kho": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/khorneship01/kho_agent_ship.rigid_model_v2",
+      "sea": true
+    },
+    "sea_nur": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/nurgleship01/nur_transport_main.rigid_model_v2",
+      "sea": true
+    },
+    "sea_sla": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/slaaneshship01/sla_agent_ship.rigid_model_v2",
+      "sea": true
+    },
+    "sea_tze": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/tzeentchship01/tze_agent_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_bst": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/beastmenship01/bst_light_ship01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_chs": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/agentship02/chs/chs_agent_ship/chs_agent_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_nor": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/transportship05/nor/nor_transport_ship/nor_transport_ship_01.rigid_model_v2",
+      "sea": true
+    },
+    "sea_grn": {
+      "pack": "models_other.pack",
+      "source": "art/campaign/ships/lightship02/grn/grn_light_ship/grn_drillakilla_ship_01.rigid_model_v2",
+      "sea": true
+    }
+  },
+  "cultures": {
+    "wh2_dlc09_tmb_tomb_kings": {
+      "land": "land_wood",
+      "sea": "sea_tmb"
+    },
+    "wh2_dlc11_cst_vampire_coast": {
+      "land": "land_wood",
+      "sea": "sea_cst"
+    },
+    "wh2_main_def_dark_elves": {
+      "land": "land_def",
+      "sea": "sea_def"
+    },
+    "wh2_main_hef_high_elves": {
+      "land": "land_hef",
+      "sea": "sea_hef"
+    },
+    "wh2_main_lzd_lizardmen": {
+      "land": "land_wood",
+      "sea": "sea_lzd"
+    },
+    "wh2_main_rogue": {
+      "land": "land_wood",
+      "sea": "sea_emp"
+    },
+    "wh2_main_skv_skaven": {
+      "land": "land_wood",
+      "sea": "sea_skv"
+    },
+    "wh3_dlc23_chd_chaos_dwarfs": {
+      "land": "land_chd",
+      "sea": "sea_chd"
+    },
+    "wh3_dlc29_nag_undead_legions": {
+      "land": "land_wood",
+      "sea": "sea_emp"
+    },
+    "wh3_main_cth_cathay": {
+      "land": "land_cth",
+      "sea": "sea_cth"
+    },
+    "wh3_main_dae_daemons": {
+      "land": "land_chs",
+      "sea": "sea_chs"
+    },
+    "wh3_main_kho_khorne": {
+      "land": "land_chs",
+      "sea": "sea_kho"
+    },
+    "wh3_main_ksl_kislev": {
+      "land": "land_wood",
+      "sea": "sea_ksl"
+    },
+    "wh3_main_nur_nurgle": {
+      "land": "land_chs",
+      "sea": "sea_nur"
+    },
+    "wh3_main_ogr_ogre_kingdoms": {
+      "land": "land_wood",
+      "sea": "sea_ogr"
+    },
+    "wh3_main_pro_ksl_kislev": {
+      "land": "land_wood",
+      "sea": "sea_ksl"
+    },
+    "wh3_main_sla_slaanesh": {
+      "land": "land_sla",
+      "sea": "sea_sla"
+    },
+    "wh3_main_tze_tzeentch": {
+      "land": "land_chs",
+      "sea": "sea_tze"
+    },
+    "wh_dlc03_bst_beastmen": {
+      "land": "land_chs",
+      "sea": "sea_bst"
+    },
+    "wh_dlc05_wef_wood_elves": {
+      "land": "land_wood",
+      "sea": "sea_wef"
+    },
+    "wh_dlc08_nor_norsca": {
+      "land": "land_chs",
+      "sea": "sea_nor"
+    },
+    "wh_main_brt_bretonnia": {
+      "land": "land_wood",
+      "sea": "sea_brt"
+    },
+    "wh_main_chs_chaos": {
+      "land": "land_chs",
+      "sea": "sea_chs"
+    },
+    "wh_main_dwf_dwarfs": {
+      "land": "land_dwf",
+      "sea": "sea_dwf"
+    },
+    "wh_main_emp_empire": {
+      "land": "land_wood",
+      "sea": "sea_emp"
+    },
+    "wh_main_grn_greenskins": {
+      "land": "land_grn",
+      "sea": "sea_grn"
+    },
+    "wh_main_vmp_vampire_counts": {
+      "land": "land_wood",
+      "sea": "sea_vmp"
+    },
+    "*": {
+      "land": "land_wood",
+      "sea": "sea_emp"
+    }
+  }
+}

@@ -40,7 +40,7 @@ resources_long_description_res_derpy_amber		false
 effects_description_derpy_effect_region_resource_amber_production	Amber resource production: %n chests	false
 uied_component_texts_localised_string_derpy_mr_amber_Tooltip	Amber||A building in this settlement produces Amber, a trade resource.	false
 resources_onscreen_text_res_derpy_grain	Grain	false
-resources_description_res_derpy_grain	Wheat, rye and barley from the farmland of the Old World and the barley fields of the Dwarf holds. Bread for cities and fodder for armies.	false
+resources_description_res_derpy_grain	Wheat, rye and barley from working farms. Bread for cities and fodder for armies.	false
 resources_long_description_res_derpy_grain		false
 effects_description_derpy_effect_region_resource_grain_production	Grain resource production: %n sacks	false
 uied_component_texts_localised_string_derpy_mr_grain_Tooltip	Grain||A building in this settlement produces Grain, a trade resource.	false
@@ -140,7 +140,7 @@ resources_long_description_res_derpy_incense		false
 effects_description_derpy_effect_region_resource_incense_production	Incense resource production: %n sacks	false
 uied_component_texts_localised_string_derpy_mr_incense_Tooltip	Incense||A building in this settlement produces Incense, a trade resource.	false
 resources_onscreen_text_res_derpy_salted_meat	Salted Meat	false
-resources_description_res_derpy_salted_meat	Ogre herds and hunting grounds fill the barrels. Meat keeps; armies march on it.	false
+resources_description_res_derpy_salted_meat	Hunting grounds, herds and settlement provisioners fill the barrels. Meat keeps; armies march on it.	false
 resources_long_description_res_derpy_salted_meat		false
 effects_description_derpy_effect_region_resource_salted_meat_production	Salted Meat resource production: %n barrels	false
 uied_component_texts_localised_string_derpy_mr_salted_meat_Tooltip	Salted Meat||A building in this settlement produces Salted Meat, a trade resource.	false
@@ -199,6 +199,26 @@ resources_description_res_derpy_wyvern_scales	Scales of the wyverns that nest in
 resources_long_description_res_derpy_wyvern_scales		false
 effects_description_derpy_effect_region_resource_wyvern_scales_production	Wyvern Scales resource production: %n bundle	false
 uied_component_texts_localised_string_derpy_mr_wyvern_scales_Tooltip	Wyvern Scales||A building in this settlement produces Wyvern Scales, a trade resource.	false
+resources_onscreen_text_res_derpy_hardtack	Hardtack	false
+resources_description_res_derpy_hardtack	Hard ship's biscuit, baked dry for long voyages and campaign wagons. It keeps better than fresh bread.	false
+resources_long_description_res_derpy_hardtack		false
+effects_description_derpy_effect_region_resource_hardtack_production	Hardtack resource production: %n sacks	false
+uied_component_texts_localised_string_derpy_mr_hardtack_Tooltip	Hardtack||A building in this settlement produces Hardtack, a trade resource.	false
+resources_onscreen_text_res_derpy_leather	Leather	false
+resources_description_res_derpy_leather	Cured hides for boots, harness, armour straps and stretcher slings.	false
+resources_long_description_res_derpy_leather		false
+effects_description_derpy_effect_region_resource_leather_production	Leather resource production: %n bundle	false
+uied_component_texts_localised_string_derpy_mr_leather_Tooltip	Leather||A building in this settlement produces Leather, a trade resource.	false
+resources_onscreen_text_res_derpy_cloth	Cloth	false
+resources_description_res_derpy_cloth	Plain woven cloth for tents, work clothes and clean dressings. A necessity rather than a courtly luxury.	false
+resources_long_description_res_derpy_cloth		false
+effects_description_derpy_effect_region_resource_cloth_production	Cloth resource production: %n bolts	false
+uied_component_texts_localised_string_derpy_mr_cloth_Tooltip	Cloth||A building in this settlement produces Cloth, a trade resource.	false
+resources_onscreen_text_res_derpy_tools	Tools	false
+resources_description_res_derpy_tools	Hammers, tongs, chisels and saws. Every work gang needs them; every campaign wears them out.	false
+resources_long_description_res_derpy_tools		false
+effects_description_derpy_effect_region_resource_tools_production	Tools resource production: %n crates	false
+uied_component_texts_localised_string_derpy_mr_tools_Tooltip	Tools||A building in this settlement produces Tools, a trade resource.	false
 building_culture_variants_name_derpy_mr_bld_gromril_1	Gromril Prospect	false
 building_culture_variants_name_derpy_mr_bld_gromril_2	Gromril Delving	false
 building_culture_variants_name_derpy_mr_bld_gromril_3	Deep Gromril Mine	false
@@ -330,6 +350,8 @@ effects_description_derpy_mr_effect_rank_hef_dragons_dragon_princes	Recruit rank
 effects_description_derpy_mr_effect_upkeep_wef_gladeguard_gladeriders	Upkeep: %+n% for Glade Guard and Glade Riders units	false
 pooled_resource_factors_display_name_positive_derpy_mr_stocked	Stocked	false
 pooled_resource_factors_display_name_negative_derpy_mr_stocked	Stocked	false
+pooled_resource_factors_display_name_positive_derpy_mr_processed	Processed	false
+pooled_resource_factors_display_name_negative_derpy_mr_processed	Processing reversed	false
 pooled_resource_factors_display_name_positive_derpy_mr_raided	Raid spoils	false
 pooled_resource_factors_display_name_negative_derpy_mr_raided	Raided	false
 pooled_resource_factors_display_name_positive_derpy_mr_plundered	Plunder	false
@@ -529,6 +551,26 @@ pooled_resources_description_derpy_mr_store_wyvern_scales	Wyvern Scales kept in 
 pooled_resources_positive_factors_display_name_derpy_mr_store_wyvern_scales	Stocked	false
 pooled_resources_negative_factors_display_name_derpy_mr_store_wyvern_scales	Used	false
 effects_description_derpy_mr_store_wyvern_scales_stocked	Wyvern Scales stocked: %n	false
+pooled_resources_display_name_derpy_mr_store_hardtack	Hardtack	false
+pooled_resources_description_derpy_mr_store_hardtack	Hardtack kept in this settlement's stores. They fill each turn with what its buildings make.	false
+pooled_resources_positive_factors_display_name_derpy_mr_store_hardtack	Stocked	false
+pooled_resources_negative_factors_display_name_derpy_mr_store_hardtack	Used	false
+effects_description_derpy_mr_store_hardtack_stocked	Hardtack stocked: %n	false
+pooled_resources_display_name_derpy_mr_store_leather	Leather	false
+pooled_resources_description_derpy_mr_store_leather	Leather kept in this settlement's stores. They fill each turn with what its buildings make.	false
+pooled_resources_positive_factors_display_name_derpy_mr_store_leather	Stocked	false
+pooled_resources_negative_factors_display_name_derpy_mr_store_leather	Used	false
+effects_description_derpy_mr_store_leather_stocked	Leather stocked: %n	false
+pooled_resources_display_name_derpy_mr_store_cloth	Cloth	false
+pooled_resources_description_derpy_mr_store_cloth	Cloth kept in this settlement's stores. They fill each turn with what its buildings make.	false
+pooled_resources_positive_factors_display_name_derpy_mr_store_cloth	Stocked	false
+pooled_resources_negative_factors_display_name_derpy_mr_store_cloth	Used	false
+effects_description_derpy_mr_store_cloth_stocked	Cloth stocked: %n	false
+pooled_resources_display_name_derpy_mr_store_tools	Tools	false
+pooled_resources_description_derpy_mr_store_tools	Tools kept in this settlement's stores. They fill each turn with what its buildings make.	false
+pooled_resources_positive_factors_display_name_derpy_mr_store_tools	Stocked	false
+pooled_resources_negative_factors_display_name_derpy_mr_store_tools	Used	false
+effects_description_derpy_mr_store_tools_stocked	Tools stocked: %n	false
 pooled_resources_display_name_derpy_mr_store_animals	Exotic Animals	false
 pooled_resources_description_derpy_mr_store_animals	Exotic Animals kept in this settlement's stores. They fill each turn with what its buildings make.	false
 pooled_resources_positive_factors_display_name_derpy_mr_store_animals	Stocked	false
@@ -708,6 +750,14 @@ effect_bundles_localised_title_derpy_mr_hold_feathers	[hidden]	false
 effect_bundles_localised_description_derpy_mr_hold_feathers	[hidden]	false
 effect_bundles_localised_title_derpy_mr_hold_wyvern_scales	[hidden]	false
 effect_bundles_localised_description_derpy_mr_hold_wyvern_scales	[hidden]	false
+effect_bundles_localised_title_derpy_mr_hold_hardtack	[hidden]	false
+effect_bundles_localised_description_derpy_mr_hold_hardtack	[hidden]	false
+effect_bundles_localised_title_derpy_mr_hold_leather	[hidden]	false
+effect_bundles_localised_description_derpy_mr_hold_leather	[hidden]	false
+effect_bundles_localised_title_derpy_mr_hold_cloth	[hidden]	false
+effect_bundles_localised_description_derpy_mr_hold_cloth	[hidden]	false
+effect_bundles_localised_title_derpy_mr_hold_tools	[hidden]	false
+effect_bundles_localised_description_derpy_mr_hold_tools	[hidden]	false
 effect_bundles_localised_title_derpy_mr_hold_animals	[hidden]	false
 effect_bundles_localised_description_derpy_mr_hold_animals	[hidden]	false
 effect_bundles_localised_title_derpy_mr_hold_dyes	[hidden]	false
@@ -748,6 +798,22 @@ effect_bundles_localised_title_derpy_mr_garrison_stocked	Garrison stocked	false
 effect_bundles_localised_description_derpy_mr_garrison_stocked	War materials fill at least a quarter of one store's space in this settlement.	false
 effect_bundles_localised_title_derpy_mr_comforts	Comforts	false
 effect_bundles_localised_description_derpy_mr_comforts	Luxuries fill at least a quarter of one store's space in this settlement.	false
+effect_bundles_localised_title_derpy_mr_service_archives	Scholars' halls	false
+effect_bundles_localised_description_derpy_mr_service_archives	Paid each turn from this province capital's stores. Province growth +5.	false
+effect_bundles_localised_title_derpy_mr_service_builders	Builders' yards	false
+effect_bundles_localised_description_derpy_mr_service_builders	Paid each turn from this province capital's stores. Province construction cost -5%.	false
+effect_bundles_localised_title_derpy_mr_service_feasts	Village feasts	false
+effect_bundles_localised_description_derpy_mr_service_feasts	Paid each turn from this province capital's stores. Province control +2.	false
+effect_bundles_localised_title_derpy_mr_service_halls	Drinking halls	false
+effect_bundles_localised_description_derpy_mr_service_halls	Paid each turn from this province capital's stores. Province control +2.	false
+effect_bundles_localised_title_derpy_mr_service_hospital	Field hospitals	false
+effect_bundles_localised_description_derpy_mr_service_hospital	Paid each turn from this province capital's stores. Own armies in the province: replenishment +3%.	false
+effect_bundles_localised_title_derpy_mr_service_mess	Factory mess	false
+effect_bundles_localised_description_derpy_mr_service_mess	Paid each turn from this province capital's stores. Province control +2.	false
+effect_bundles_localised_title_derpy_mr_service_records	Civic records	false
+effect_bundles_localised_description_derpy_mr_service_records	Paid each turn from this province capital's stores. Province growth +5.	false
+effect_bundles_localised_title_derpy_mr_service_tea	Tea houses	false
+effect_bundles_localised_description_derpy_mr_service_tea	Paid each turn from this province capital's stores. Province control +2.	false
 effect_bundles_localised_title_derpy_mr_event_feast	Feast	false
 effect_bundles_localised_description_derpy_mr_event_feast	A feast paid for from this settlement's stores: public order and growth are up.	false
 effect_bundles_localised_title_derpy_mr_event_siege	Siege Stores	false
@@ -782,6 +848,13 @@ effect_bundles_localised_title_derpy_mr_order_muster	Muster	false
 effect_bundles_localised_description_derpy_mr_order_muster	Paid for from your stores: recruit rank +1 for every unit.	false
 effect_bundles_localised_title_derpy_mr_order_great_works	Great Works	false
 effect_bundles_localised_description_derpy_mr_order_great_works	Paid for from your stores: construction cost -20% for every building.	false
+effect_bundles_localised_title_derpy_mr_army_hungry	Short rations	false
+effect_bundles_localised_description_derpy_mr_army_hungry	Two missed meals. Refill locally or buy field rations where available.	false
+effect_bundles_localised_title_derpy_mr_army_starved	Empty provision wagons	false
+effect_bundles_localised_description_derpy_mr_army_starved	Three or more missed meals. A full meal clears these penalties.	false
+event_feed_strings_text_derpy_mr_army_food_title	Provision wagons running dry	false
+event_feed_strings_text_derpy_mr_army_food_primary	An army has missed its meal.	false
+event_feed_strings_text_derpy_mr_army_food_secondary	Open Resource Vault > Spending to check army provisions. Refill from your own unsieged local settlement above Keep. Repeated shortages reduce movement and replenishment.	false
 effect_bundles_localised_title_derpy_mr_rc_army_ammo	Ammunition Train	false
 effect_bundles_localised_description_derpy_mr_rc_army_ammo	Paid for from your stores: ammunition +20%, 5 turns.	false
 effect_bundles_localised_title_derpy_mr_rc_army_forge	Field Forge	false

@@ -31,8 +31,9 @@ DERPY_MR_STORES_L = {
     MAP_FRAME_OUT = 4,
     MAP_MIN_SPAN = 40,
     MAP_PAD = 24,
-    MAP_PATH = 4,
-    MAP_STEPS = 6,
+    MAP_PATH = 6,
+    MAP_PATH_COLOURS = 16,
+    MAP_PATH_MAX = 400,
     MAP_TOWN_ICON = "ui/skins/default/icon_marker_settlement.png",
     MAP_ZOOM_MAX = 3,
     MAP_ZOOM_STEP = 1.5,
@@ -44,7 +45,7 @@ DERPY_MR_STORES_L = {
     SLIDER_PARTS = {{"frame_top", -1, -24}, {"frame_bottom", -1, 0}, {"top", 1, -23}, {"bottom", 1, -1}},
     SLIDER_W = 18,
     USING = 4,
-    VIEWS = {focus = {{36, 230, "left"}, {276, 120, "right"}, {406, 90, "right"}, {506, 80, "left"}, {596, 204, "left"}}, goods = {{36, 204, "left"}, {244, 90, "right"}, {338, 100, "right"}, {442, 110, "right"}, {556, 240, "right"}}, map = {{36, 204, "left"}, {244, 90, "right"}, {338, 100, "right"}, {442, 110, "right"}, {556, 240, "right"}}, settlements = {{36, 230, "left"}, {276, 46, "right"}, {330, 90, "left"}, {430, 80, "right"}, {520, 280, "right"}}, spending = {{36, 230, "left"}, {276, 126, "centre"}, {408, 126, "centre"}, {540, 126, "centre"}, {672, 128, "centre"}}, trade = {{36, 230, "left"}, {276, 60, "right"}, {346, 90, "centre"}, {446, 90, "centre"}, {546, 254, "left"}}, workshop = {{36, 210, "left"}, {252, 200, "left"}, {458, 100, "left"}, {564, 98, "left"}, {668, 132, "left"}}, workshop_focus = {{36, 300, "left"}, {344, 120, "left"}, {472, 100, "left"}, {580, 60, "left"}, {668, 132, "left"}}},
+    VIEWS = {focus = {{36, 230, "left"}, {276, 120, "right"}, {406, 90, "right"}, {506, 80, "left"}, {596, 204, "left"}}, goods = {{36, 204, "left"}, {244, 90, "right"}, {338, 100, "right"}, {442, 110, "right"}, {556, 240, "right"}}, map = {{36, 204, "left"}, {244, 90, "right"}, {338, 100, "right"}, {442, 110, "right"}, {556, 240, "right"}}, settlements = {{36, 230, "left"}, {276, 46, "right"}, {330, 90, "left"}, {430, 80, "right"}, {520, 280, "right"}}, spending = {{36, 230, "left"}, {276, 126, "centre"}, {408, 126, "centre"}, {540, 126, "centre"}, {672, 128, "centre"}}, trade = {{36, 230, "left"}, {276, 60, "right"}, {346, 90, "centre"}, {446, 90, "centre"}, {546, 254, "left"}}, trade_focus = {{36, 240, "left"}, {286, 150, "left"}, {446, 90, "centre"}, {546, 130, "centre"}, {686, 114, "centre"}}, workshop = {{36, 210, "left"}, {252, 200, "left"}, {458, 100, "left"}, {564, 98, "left"}, {668, 132, "left"}}, workshop_focus = {{36, 300, "left"}, {344, 120, "left"}, {472, 100, "left"}, {580, 60, "left"}, {668, 132, "left"}}},
     W = 860,
     back = {720, 56, 120, 26},
     bars = {20, 420, 820, 120},
@@ -117,6 +118,10 @@ DERPY_MR_STORES_GOODS = {
     {stem = "starwood", res = "res_derpy_starwood", icon = "ui/campaign ui/effect_bundles/resource_derpy_starwood.png", use = "building", rare = true},
     {stem = "feathers", res = "res_derpy_feathers", icon = "ui/campaign ui/effect_bundles/resource_derpy_feathers.png", use = "mounts", rare = true},
     {stem = "wyvern_scales", res = "res_derpy_wyvern_scales", icon = "ui/campaign ui/effect_bundles/resource_derpy_wyvern_scales.png", use = "mounts", rare = true},
+    {stem = "hardtack", res = "res_derpy_hardtack", icon = "ui/campaign ui/effect_bundles/resource_derpy_hardtack.png", use = "provisions", rare = false},
+    {stem = "leather", res = "res_derpy_leather", icon = "ui/campaign ui/effect_bundles/resource_derpy_leather.png", use = "war", rare = false},
+    {stem = "cloth", res = "res_derpy_cloth", icon = "ui/campaign ui/effect_bundles/resource_derpy_cloth.png", use = "building", rare = false},
+    {stem = "tools", res = "res_derpy_tools", icon = "ui/campaign ui/effect_bundles/resource_derpy_tools.png", use = "building", rare = false},
     {stem = "animals", res = "res_animals", icon = "ui/campaign ui/effect_bundles/resource_animals.png", use = "mounts", rare = false},
     {stem = "dyes", res = "res_dyes", icon = "ui/campaign ui/effect_bundles/resource_dyes.png", use = "luxuries", rare = false},
     {stem = "gems", res = "res_gems", icon = "ui/campaign ui/effect_bundles/resource_gemstones.png", use = "luxuries", rare = false},
@@ -970,7 +975,7 @@ function S.read_settlement(region, bare)
         pcall(function() s.level = st:primary_slot():building():building_level() end)
         local ok, str = pcall(common.get_context_value, "CcoCampaignSettlement",
                               tostring(st:cqi()), S.CCO)
-        if ok and type(str) == "string" then s.made = S.parse_made(str) end
+        if ok and type(str) == "string" then s.made = S.parse_made(str); s.made_known = true end
     end
     return s
 end
@@ -1208,8 +1213,16 @@ end
 
 S.DUTY_ICON = "ui/campaign ui/effect_bundles/income.png"
 S.RECRUIT_HEAD = "Recruits last turn"
+S.CUT_ICON = "ui/campaign ui/effect_bundles/trade_agreement.png"
+function S.cut_tip(cut, turns)
+    local lines = { "No resources or import duty move with these trade partners: the road between your capitals "
+        .. "takes more than " .. turns .. " turns, or crosses lands at war with, or very unfriendly to, one of you." }
+    for _, c in ipairs(cut) do lines[#lines + 1] = loc("factions_screen_name_" .. c.key, c.key) .. ": " .. c.why end
+    return table.concat(lines, "\n")
+end
+
 function S.duty_tip(d, pct)
-    local lines = { "Each turn you pay every trade partner " .. pct .. "% of the value of what its settlements make, "
+    local lines = { "Each turn you pay every trade partner within reach " .. pct .. "% of the value of what its settlements make, "
         .. "and each partner pays you the same on what yours make. Last turn:" }
     local keys = {}
     for k in pairs(d.by) do keys[#keys + 1] = k end
@@ -1242,13 +1255,17 @@ end
 -- which of DERPY_MR_STORES_L.VIEWS the panel shows: both drill-downs share "focus"; the
 -- Workshop's upgrade drill-down has its own
 function S.view_key()
+    if S.view == "trade" and S.focus then return "trade_focus" end
     if S.view == "workshop" then return S.focus and "workshop_focus" or "workshop" end
+    if S.view == "spending" and S.focus and string.sub(S.focus, 1, 5) == "army:" then return "spending" end
+    if S.focus and (string.sub(S.focus, 1, 6) == "route:" or string.sub(S.focus, 1, 7) == "routes:") then return "trade_focus" end
     if S.focus then return "focus" end
     return S.view
 end
 
 -- ---- the actions (spending spec section 5, phase 7) ------------------------------------
 S.SEND = "derpy_mr_sendhere"
+S.POLICY = "derpy_mr_policy_"
 S.ORDER = "derpy_mr_order_"
 S.SELL = "derpy_mr_sell"
 S.NO_SHIPS = "Nothing on the road. To send a shipment, open a settlement's resources and press Send here."
@@ -1305,7 +1322,7 @@ function S.send_tip(plan, d, coming)
         local from = loc("regions_onscreen_" .. plan.from:name(), plan.from:name())
         local sh = S.flows("SHIP")
         out = "Ship " .. S.num(plan.n) .. " " .. d.name .. " from " .. from .. ": " .. S.num(plan.got)
-            .. " arrive in " .. turns(sh and sh.turns or 2) .. ", " .. S.num(plan.n - plan.got)
+            .. " arrive in " .. turns(plan.turns or (sh and sh.turns) or 2) .. ", " .. S.num(plan.n - plan.got)
             .. " are lost on the way. An army at war with you can seize it on the road."
     elseif d.full then
         out = "This store of " .. d.name .. " is full."
@@ -1315,7 +1332,7 @@ function S.send_tip(plan, d, coming)
         out = "No other settlement of yours can send " .. d.name .. "."
     end
     for _, s in ipairs(coming or {}) do
-        out = out .. "\nOn the road here: " .. S.num(s.n) .. ", arriving on turn " .. s.due .. "."
+        out = out .. "\nOn the road here: " .. S.num(s.n) .. ", arriving on turn " .. tostring(S.ask("ship_due", s) or s.due) .. "."
     end
     return out
 end
@@ -1433,9 +1450,183 @@ function S.found_row(fs, rkey)
              send = { label = fs.level == 0 and "Found" or "Upgrade", tip = tip, off = fs.why ~= nil } }
 end
 
+function S.policy_context(stem)
+    local f = S.local_faction()
+    local cap = f and S.ask("capital", f)
+    local v = cap and S.ask("stock_view", f, cap)
+    if not v then return nil end
+    local g
+    for _, good in ipairs(DERPY_MR_STORES_GOODS) do if good.stem == stem then g = good; break end end
+    if not g then return nil end
+    local p = v.policy[stem] or {}
+    local keep = g.rare and 0 or (v.auto_keep[g.use] or 0)
+    local target = g.rare and (v.work_target[stem] or 0) or (v.auto_target[g.use] or 0)
+    target = math.min(v.capacity[stem] or 0, math.max(target, p.keep or 0))
+    return { view = v, good = g, policy = p, keep = keep, target = target, capital = cap:name() }
+end
+
+function S.trade_focus(v)
+    v.title = "Stock rules: " .. S.name(S.focus)
+    v.heads = { "Rule", "Amount", "Less", "Default", "More" }
+    v.empty = "Stock rules are unavailable without the stores model and an owned capital."
+    local c = S.policy_context(S.focus)
+    if not c then return end
+    local shared = not c.good.rare
+    local word = S.USE_WORD[c.good.use] or c.good.use
+    for _, item in ipairs({ { "keep", "Keep in each store" }, { "target", "Import target at capital" } }) do
+        local field, label = item[1], item[2]
+        local n = c.policy[field]
+        local value = n ~= nil and S.num(n) or ("Auto: " .. S.num(c[field]))
+        local tip = field == "keep" and "Protects outgoing trade, shipments and surplus sales in every settlement. Spending and enemy seizure can use this stock."
+            or ("Trade partners deliver toward this target at " .. S.place(c.capital) .. ". Domestic shipments use free space. Zero stops requests for this resource.")
+        if n == nil and shared then tip = tip .. " Auto is shared by common " .. word .. ", not reserved for each good." end
+        v.rows[#v.rows + 1] = { label, value, "", "", "", policy = field, stem = S.focus, tip = tip }
+    end
+    v.hint = "Step: 10. Auto restores the calculated rule."
+    local x, stem = c.view, S.focus
+    v.rows[#v.rows + 1] = { "Capital: " .. S.place(c.capital), "", "", "", "" }
+    v.rows[#v.rows + 1] = { "Held / incoming", S.num(x.held[stem] or 0) .. " / " .. S.num(x.incoming[stem] or 0), "", "", "" }
+    v.rows[#v.rows + 1] = { "Remaining import need", S.num(S.ask("import_need", x, stem) or 0), "", "", "" }
+    local stopped = S.flows("stopped")
+    if stopped then
+        local fk = x.faction:name()
+        v.rows[#v.rows + 1] = { "Trade switches", (stopped(fk, "export", stem) and "Exports stopped" or "Exports allowed"), "", "", "",
+            tip = stopped(fk, "import", stem) and "Imports stopped: the target cannot request stock." or "Imports allowed; target and free space still apply." }
+    end
+    if shared then
+        v.rows[#v.rows + 1] = { "Auto category: " .. word, S.num(x.totals[c.good.use] or 0) .. " held", "", "", "",
+            tip = "Common goods in this category share one reserve and import target. Rare goods do not count." }
+    else
+        local names = {}
+        local f = x.faction
+        for _, w in ipairs(DERPY_MR_STORES_WORKS or {}) do
+            local catalog = S.flows("WORK")
+            local work = catalog and catalog[w.key]
+            if work and work.rare == stem and S.ask("work_open", f, work) then names[#names + 1] = w.name end
+        end
+        v.rows[#v.rows + 1] = { "Auto: one Workshop batch", S.num(c.target), "", "", "", tip = table.concat(names, ", ") }
+    end
+    for _, ship in ipairs(x.due or {}) do
+        if ship.stem == stem then v.rows[#v.rows + 1] = { "Incoming on turn " .. tostring(ship.due), S.num(ship.n), "", "", "" } end
+    end
+    if S.actions_on() then v.rows[#v.rows + 1] = { "Supply routes and partner contracts", "", "", "", "",
+        open = "routes:" .. c.capital .. ":" .. stem, tip = "Choose a named source for recurring deliveries to this capital." } end
+end
+
+S.ROUTE_TIP = "Each cart carries up to 100 gross units; 10% is lost at dispatch. Travel takes 1–6 owner turns by coordinate distance, without road or sea pathfinding. Source Keep, trade holds and cart limits apply."
+
+function S.route_offers(v)
+    v.title, v.heads = "Create a supply route", { "Source", "Surplus", "Travel", "Gold / unit", "" }
+    v.hint, v.empty = "Click Create to accept a recurring order. Edit it under Spending.", "No source has exportable surplus."
+    local rkey, stem = string.match(S.focus, "^routes:([%w_]+):([%w_]+)$")
+    local f = S.local_faction()
+    local to = f and rkey and S.ask("owned", f, rkey)
+    if not to or not stem then return end
+    local sources = { f }
+    local ps = f:factions_trading_with()
+    if type(ps) ~= "boolean" then for i = 0, ps:num_items() - 1 do sources[#sources + 1] = ps:item_at(i) end end
+    table.sort(sources, function(a,b) return a:name() < b:name() end)
+    local good = (S.flows("GOOD") or {})[stem]
+    if not good then return end
+    for _, seller in ipairs(sources) do
+        local rl = seller:region_list()
+        local ordered = {}
+        for i = 0, rl:num_items() - 1 do ordered[#ordered + 1] = rl:item_at(i) end
+        table.sort(ordered, function(a,b) return a:name() < b:name() end)
+        for _, from in ipairs(ordered) do
+            local x = S.ask("stock_view", seller, from)
+            local available = x and S.ask("available_stock", x, stem) or 0
+            if from:name() ~= rkey and available > 1 then
+                local price = seller:name() ~= f:name() and math.max(1, math.floor((S.flows("SELL_RATE") or {})[good.use] or 0)) or 0
+                local target = math.min(100, S.ask("free", to, stem) or 100)
+                if target < 1 then target = 100 end
+                local test = {seller=seller:name(),from=from:name(),to=rkey,stem=stem}
+                local valid = S.ask("route_status", f, test, "show")
+                for _, o in ipairs(S.ask("routes", f) or {}) do
+                    if o.from == from:name() and o.to == rkey and o.stem == stem then valid = nil end
+                end
+                local tip = S.name(stem) .. " to " .. S.place(rkey) .. ". Target " .. target .. "; batch 100. " .. S.ROUTE_TIP
+                if price > 0 then tip = tip .. "\nAccepts a fixed price of " .. price .. " gold per delivered unit. Only dispatched batches reserve gold; at most 90 units per cart. The seller is paid after delivery. Cancellation or loss refunds unpaid escrow. War or a lost destination returns net cargo to the seller." end
+                v.rows[#v.rows + 1] = { S.place(from:name()), S.num(available), turns(S.ask("route_turns", from, to) or 2), price > 0 and S.num(price) or "Internal",
+                    "", tip = tip, route_request = { "route_new", from:name(), rkey, stem, tostring(target), "100" },
+                    send = { label = "Create", tip = tip, off = not valid } }
+            end
+        end
+    end
+end
+
+function S.route_view(v)
+    v.title, v.heads = "Recurring supply order", { "Rule", "Amount", "Less", "Default", "More" }
+    local id = string.sub(S.focus, 7)
+    local f, order = S.local_faction(), nil
+    for _, o in ipairs(f and S.ask("routes", f) or {}) do if o.id == id then order = o end end
+    if not order then v.empty = "Order no longer exists."; return end
+    local o = order
+    local summary = S.place(o.from) .. " → " .. S.place(o.to) .. ": " .. S.name(o.stem)
+    v.rows[#v.rows + 1] = { summary, o.status or "Not dispatched yet", "", "", "", tip = S.ROUTE_TIP }
+    for _, field in ipairs({"target", "batch"}) do
+        v.rows[#v.rows + 1] = { field == "target" and "Net stock target" or "Gross batch limit", S.num(o[field]), "", "", "",
+            policy = field, route = id, tip = "Step 10. Default 100. Target subtracts stock and incoming net cargo; batch is 2–100 gross." }
+    end
+    v.rows[#v.rows + 1] = { o.price and ("Locked price: " .. o.price .. " gold / delivered unit") or "Internal transfer: no gold", "", "", "", "" }
+    local escrow = 0
+    for _, s in ipairs(S.ask("ships") or {}) do
+        if s.f == f:name() and s.route == id then escrow = escrow + (s.escrow or 0) end
+    end
+    v.rows[#v.rows + 1] = { "Gold currently in escrow", S.num(escrow), "", "", "" }
+    v.rows[#v.rows + 1] = { o.enabled and "Dispatch enabled" or "Dispatch paused", "", "", "", "", route_request={"route_ctl",id,"toggle"},
+        send={label=o.enabled and "Pause" or "Resume",tip="Pausing stops future dispatch; travelling cargo completes its journey."} }
+    v.rows[#v.rows + 1] = { "Cancel this order", "", "", "", "", route_request={"route_ctl",id,"cancel"},
+        send={label="Cancel",tip="Removes the order. Partner cargo returns to the seller and refunds unpaid escrow. Internal cargo already travelling still arrives."} }
+end
+
+function S.forecast_tip(f, region, settlement)
+    local v = S.ask("stock_view", f, region)
+    if not v then return "" end
+    local made
+    if settlement and settlement.made_known then
+        made = {}
+        for _, g in ipairs(DERPY_MR_STORES_GOODS) do
+            if not g.rare then made[g.use] = (made[g.use] or 0) + (settlement.made[g.stem] or 0) end
+        end
+    end
+    local forecasts = S.ask("stock_forecast", v, made)
+    if not forecasts then return "" end
+    local lines = {}
+    for _, use in ipairs({ "provisions", "building", "war", "mounts", "luxuries" }) do
+        local fc = forecasts[use]
+        if fc then
+            local cover = fc.cover and (S.num(fc.cover) .. (fc.mode == "stored" and " turns stored" or " turns cover"))
+                or (fc.mode == "stable" and "stable" or "no recurring use")
+            lines[#lines + 1] = (S.USE_WORD[use] or use) .. ": " .. S.num(fc.held) .. " held; "
+                .. S.num(fc.use_per_turn) .. " used/turn; " .. (fc.production ~= nil and
+                (S.num(fc.production) .. " made; net " .. S.num(fc.net)) or "production unknown") .. "; " .. cover
+                .. "; incoming " .. S.num(fc.incoming) .. "."
+        end
+    end
+    for _, ship in ipairs(v.due or {}) do lines[#lines + 1] = S.name(ship.stem) .. " " .. S.num(ship.n) .. " due turn " .. tostring(ship.due) .. "." end
+    local named, stems = (v.recurring or {}).named or {}, {}
+    if (v.recurring.army_need or 0) > 0 then
+        lines[#lines + 1] = "Local armies on Auto: " .. S.num(v.recurring.army_need)
+            .. " provisions per turn included. Army loading can spend its army reserve; settlement Keep remains protected."
+    end
+    for stem in pairs(named) do stems[#stems + 1] = stem end
+    table.sort(stems)
+    if #stems > 0 then
+        local parts = {}
+        for _, stem in ipairs(stems) do parts[#parts + 1] = S.num(named[stem]) .. " " .. S.name(stem) end
+        lines[#lines + 1] = "Enabled batch/service input budget: " .. table.concat(parts, ", ")
+            .. " per turn. Paused orders may use less; processing output is conditional. Named inputs are kept separately."
+    end
+    lines[#lines + 1] = "Estimates assume unchanged production and switches; exclude future trade, recruits, battles and purchases. Incoming cargo is separate from current cover."
+    return table.concat(lines, "\n")
+end
+
 function S.view_model(realm)
     local v = { rows = {}, empty = S.NOTHING }
-    if S.view == "goods" and S.focus then
+    if S.focus and string.sub(S.focus, 1, 7) == "routes:" then S.route_offers(v)
+    elseif S.focus and string.sub(S.focus, 1, 6) == "route:" then S.route_view(v)
+    elseif S.view == "goods" and S.focus then
         v.title = "Where " .. S.name(S.focus) .. " is kept"
         v.heads = { "Settlement", "Held / Space", "Per turn", "", "" }
         for _, d in ipairs(S.good_detail(realm, S.focus)) do
@@ -1461,7 +1652,8 @@ function S.view_model(realm)
         end
         if #realm == 0 then v.empty = S.NO_REALM end
     elseif S.view == "spending" then
-        if S.focus then S.escort_view(v) else S.spending(v) end
+        if S.focus and string.sub(S.focus, 1, 5) == "army:" then S.army_view(v)
+        elseif S.focus then S.escort_view(v) else S.spending(v) end
     elseif S.view == "workshop" then
         S.workshop(v, realm)
     elseif S.view == "map" then
@@ -1470,6 +1662,8 @@ function S.view_model(realm)
         v.hint = "Click a convoy or a settlement to fly there."
         local f = S.local_faction()
         if f then v.map = S.map_model(f, S.map_view) end
+    elseif S.view == "trade" and S.focus then
+        S.trade_focus(v)
     elseif S.view == "trade" then
         v.title = "What your settlements trade"
         v.heads = { "Resource", "Held", "Exports", "Imports", "Last turn" }
@@ -1477,7 +1671,7 @@ function S.view_model(realm)
         local fk = cm:get_local_faction_name(true)
         local switches = stopped ~= nil and S.flows("send") ~= nil
         if switches then
-            v.hint = "Tick to allow, untick to stop."
+            v.hint = "Tick to allow. Click a resource for rules."
             v.bulk = true
         end
         -- IMPORT DUTY, first: last turn's gold each way (flows.lua F.duty), while the rate is on
@@ -1486,6 +1680,12 @@ function S.view_model(realm)
             local d = duty(fk) or { paid = 0, got = 0, by = {} }
             v.rows[#v.rows + 1] = { "Import duty", "", "", "", "paid " .. S.num(d.paid) .. ", received " .. S.num(d.got),
                                     icon = S.DUTY_ICON, tip = S.duty_tip(d, rates().duty) }
+        end
+        -- TRADE REACH: agreements moving nothing because the road is too long or blocked (flows.lua F.cut_off)
+        local cut = rates and f and S.ask("cut_off", f)
+        if cut and #cut > 0 then
+            v.rows[#v.rows + 1] = { "Trade cut off", "", "", "", #cut .. (#cut == 1 and " partner" or " partners"),
+                                    icon = S.CUT_ICON, tip = S.cut_tip(cut, rates().reach) }
         end
         local rows = S.trade_rows(realm)
         local others = 0
@@ -1500,7 +1700,7 @@ function S.view_model(realm)
             end
             if not g.own and S.folded then break end
             local row = { g.name, S.num(g.held), "", "", S.trade_line(last and last(fk, g.stem) or {}),
-                          icon = g.icon, tip = S.good_tip(g), stem = g.stem, name = g.name }
+                          icon = g.icon, tip = S.good_tip(g), stem = g.stem, name = g.name, open = g.stem }
             if not g.own then
                 for j = 1, 5 do row[j] = row[j] ~= "" and S.grey(row[j]) or "" end
                 row.dim = true
@@ -1520,16 +1720,22 @@ function S.view_model(realm)
         end
         v.title = "Stores of " .. s.name
         v.heads = { "Resource", "Held / Space", "Per turn", "", "" }
-        local f = S.actions_on() and S.local_faction()
+        local model_faction = S.local_faction()
+        local region = model_faction and S.ask("owned", model_faction, s.key)
+        local forecast = region and S.forecast_tip(model_faction, region, s) or ""
+        local f = S.actions_on() and model_faction
         local fs = f and S.ask("found_state", f, s.key)
         if fs then v.rows[#v.rows + 1] = S.found_row(fs, s.key) end
+        if f and region then S.economy_rows(v, f, region) end
         for _, d in ipairs(S.settlement_detail(s)) do
             local tip = S.good_tip(d)
             if d.full then tip = S.FULL_TIP end
             local row = { d.name, S.num(d.held) .. " / " .. S.num(d.cap),
                           per_turn(d.made), full_mark(d.full), "", icon = d.icon,
-                          tip = tip, stem = d.stem }
+                          tip = tip .. "\n" .. forecast, stem = d.stem,
+                          open = f and ("routes:" .. s.key .. ":" .. d.stem) or nil }
             if f then
+                row.tip = row.tip .. "\nClick the resource to choose a recurring source or partner contract."
                 local plan = S.ask("send_plan", f, s.key, d.stem)
                 row.send = { tip = S.send_tip(plan, d, S.ask("ships_to", f:name(), s.key, d.stem)),
                              off = plan == nil or plan.busy == true }
@@ -1567,6 +1773,43 @@ function S.icon_of(stem)
     for _, g in ipairs(DERPY_MR_STORES_GOODS) do
         if g.stem == stem then return g.icon end
     end
+end
+
+function S.economy_rows(v, faction, region)
+    local rows = S.ask("economy_rows", faction, region) or {}
+    if #rows == 0 then return end
+    local service_units = {
+        wh_main_effect_public_order_events = " control",
+        wh_main_effect_province_growth_events = " growth",
+        wh_main_effect_building_construction_cost_mod_all = "% cost",
+        wh_main_effect_force_all_campaign_replenishment_rate = "% replen.",
+    }
+    v.rows[#v.rows + 1] = { S.section("Processing and services"), S.section("Inputs"), S.section("State"), S.section("Benefit"), "", section = true }
+    for _, st in ipairs(rows) do
+        local d, parts, stems, amounts = st.definition, {}, {}, {}
+        for stem in pairs(d.cost) do stems[#stems + 1] = stem end
+        table.sort(stems)
+        for _, stem in ipairs(stems) do
+            parts[#parts + 1] = S.num(d.cost[stem]) .. " " .. S.name(stem)
+            amounts[#amounts + 1] = S.num(d.cost[stem])
+        end
+        local cost = table.concat(parts, ", ")
+        local result = d.output and (S.num(d.output[2]) .. " " .. S.name(d.output[1])) or d.benefit
+        local status = st.on and (st.paid and "Paid" or (st.ready and "Next turn" or "Paused")) or "Off"
+        local reason = st.reason or st.short or ""
+        for _, stem in ipairs(stems) do reason = string.gsub(reason, stem, S.name(stem)) end
+        local tip = d.label .. "\n" .. (d.output and "Additional batch: " or "Service each turn: ")
+            .. cost .. " -> " .. result .. ".\n" .. reason
+            .. (d.output and "\nPassive building production is unchanged. Full batches only; Keep is respected."
+                or "\nPaid locally after essential upkeep. An unpaid service gives no bonus.")
+        local amount = table.concat(amounts, " + ") .. (d.output and " / batch" or " / turn")
+        local unit = service_units[d.effect]
+        local benefit = d.output and (S.num(d.output[2]) .. " made") or
+            (unit and ((d.value > 0 and "+" or "") .. S.num(d.value) .. unit) or d.benefit)
+        v.rows[#v.rows + 1] = { d.label, amount, status, benefit, "", economy = st.key, region = region:name(),
+            tip = tip, send = { label = st.on and "Pause" or "Enable", off = not st.open and not st.on, tip = tip } }
+    end
+    v.rows[#v.rows + 1] = { S.section("Stored resources"), "", "", "", "", section = true }
 end
 
 -- A SHIPMENT'S ESCORT (escort battles, spec 2026-10-09): a shipment row opens it, one CA unit card a
@@ -1612,12 +1855,55 @@ end
 -- CA's greyscale (the Exchange's EX.set_off shader): greyed and faded, or back in colour
 S.PAYIC = "derpy_mr_supic_"   -- a Spending row's icon of the good a supply pays with
 
+S.ARMY_TIP = "One ration per four units, rounded up. Auto-refill aims for five turns after eating, up to ten turns capacity. "
+    .. "Only your own unsieged local settlement can load or unload, above its Keep. At sea or without settlements, Load buys field rations: 10 gold each, up to two meals, once per turn. Player Auto never buys. "
+    .. "First missed meal: warning; second: -5% movement; third: -10% movement and -10% replenishment. "
+    .. "A full meal resets shortages. Destroyed or merged-away armies lose their cargo: unload locally before merging."
+
+function S.army_name(row)
+    if row.force then
+        return S.char_name(row.force:general_character():command_queue_index()) or ("Army " .. row.id)
+    end
+    return "Army " .. row.id
+end
+
+function S.army_view(v)
+    local f = S.local_faction()
+    local id = string.sub(S.focus, 6)
+    local row
+    for _, r in ipairs(f and S.ask("provision_rows", f) or {}) do if r.id == id then row = r end end
+    if not row then S.focus = nil; return S.spending(v) end
+    v.title = S.army_name(row) .. ": carried provisions"
+    v.heads = { "Action", "Held", "Per turn", "Cover", "" }
+    v.hint = "Unload before merging away this army."
+    local tip = S.ARMY_TIP .. "\n" .. row.reason
+    local source = row.source and "Local stores" or (row.mobile and "Field rations" or "Unavailable")
+    if row.source then tip = tip .. "\n" .. S.place(row.source:name()) end
+    v.rows[#v.rows + 1] = { "Auto-refill", S.num(row.held) .. " / " .. S.num(row.cap),
+        S.num(row.need), S.num(math.floor(row.held / row.need)) .. " turns", provisions = "auto", army = id, tip = tip,
+        icon = S.icon_of("grain"),
+        send = { label = row.auto and "Pause" or "Enable", off = not S.actions_on(), tip = tip } }
+    v.rows[#v.rows + 1] = { row.mobile and "Buy field rations" or "Load here", source, row.mobile and (S.num(row.price) .. " gold") or "", "", provisions = "load", army = id, tip = tip,
+        send = { label = row.mobile and "Buy" or "Load", off = (not row.source and (row.buy or 0) == 0) or not S.actions_on(), tip = tip } }
+    v.rows[#v.rows + 1] = { "Unload here", "Pauses refill", "", "", provisions = "unload", army = id, tip = tip,
+        send = { label = "Unload", off = not row.source or row.held == 0 or not S.actions_on(), tip = tip } }
+    v.rows[#v.rows + 1] = { "Missed meals", S.num(row.short), "", "", "", tip = tip }
+end
+
 function S.spending(v)
     v.title = "What your stores pay for"
     v.heads = { "Province capital", "Materials", "Stables", "Arms", "Supply capital" }
     v.hint = "Tick a supply to pay for it each turn."
     local f = S.local_faction()
     if not f then return end
+    local routes = S.ask("routes", f) or {}
+    if #routes > 0 then
+        v.rows[#v.rows + 1] = { S.section("Recurring routes and contracts"), "", "", "", "", section=true }
+        for _, o in ipairs(routes) do
+            v.rows[#v.rows + 1] = { S.name(o.stem), S.place(o.from), S.place(o.to), o.enabled and "Enabled" or "Paused", "",
+                open="route:" .. o.id, tip="Target " .. o.target .. "; gross batch " .. o.batch .. ". " .. (o.status or "Not dispatched yet") .. ". Click to edit." }
+        end
+    end
     if S.supply_on() then
         local caps = {}
         for _, k in ipairs(S.ask("capitals", f) or {}) do
@@ -1629,8 +1915,11 @@ function S.spending(v)
             local row = { c.name, "", "", "", "", capital = c.key, supply = {},
                           tip = "Each supply costs " .. S.num(c.st.cost) .. " a turn from the stores of " .. c.name
                               .. ", 2 for each settlement you hold in its province." }
+            local region = S.ask("owned", f, c.key)
+            local settlement = region and S.read_settlement(region)
+            local forecast = region and S.forecast_tip(f, region, settlement) or ""
             for _, sp in ipairs(DERPY_MR_STORES_SUPPLY) do
-                row.supply[sp.key] = { on = c.st.on[sp.key] == true, tip = S.supply_tip(sp, c.st, c.name) }
+                row.supply[sp.key] = { on = c.st.on[sp.key] == true, tip = S.supply_tip(sp, c.st, c.name) .. "\n" .. forecast }
                 local pay = sp.use ~= "" and c.st.pay and c.st.pay[sp.use]
                 if pay then
                     row.supply[sp.key].pay = {
@@ -1659,12 +1948,28 @@ function S.spending(v)
             for _, g in ipairs(DERPY_MR_STORES_GOODS) do
                 if g.stem == s.stem then icon = g.icon end
             end
-            v.rows[#v.rows + 1] = { S.num(s.n) .. " " .. S.name(s.stem), from, to, "turn " .. s.due, "", icon = icon,
+            local due = S.ask("ship_due", s) or s.due
+            v.rows[#v.rows + 1] = { S.num(s.n) .. " " .. S.name(s.stem), from, to, "turn " .. due, "", icon = icon,
                                     open = S.ESCORT_FOCUS .. s.id, tip = "Click to see its escort.",
                                     send = { label = "Show", look = { s.x, s.y },
-                                             tip = "Now beside " .. (s.leg == 2 and to or from) .. ". It reaches " .. to
-                                                 .. " on turn " .. s.due .. ". Click to see it on the map." } }
+                                             tip = (s.road and "Travelling from " .. from .. " to " .. to
+                                                 or "Now beside " .. (s.leg == 2 and to or from)) .. ". It reaches " .. to
+                                                 .. " on turn " .. due .. ". Click to see it on the map." } }
         end
+    end
+    local armies = S.ask("provision_rows", f) or {}
+    if #armies > 0 or (S.ask("rates") or {}).army_provisions then
+    v.rows[#v.rows + 1] = { S.section("Army provisions"), S.section("Held"), S.section("Per turn"), S.section("Cover"), "", section = true }
+    if #armies == 0 then
+        v.rows[#v.rows + 1] = { "No provisioned armies", "", "", "", "",
+            tip = "Carried army provisions is enabled by default for new campaigns. Existing saved switches are retained. " .. S.ARMY_TIP }
+    end
+    for _, a in ipairs(armies) do
+        v.rows[#v.rows + 1] = { S.army_name(a), S.num(a.held) .. " / " .. S.num(a.cap), S.num(a.need),
+            S.num(math.floor(a.held / a.need)) .. " turns", "", open = "army:" .. a.id,
+            icon = S.icon_of("grain"),
+            tip = "Needed per turn: " .. a.need .. " common provisions\n" .. a.reason .. "\nMissed meals: " .. a.short .. "\n" .. S.ARMY_TIP }
+    end
     end
     -- RECRUITS (workshop expansion spec section 3): what last turn's recruits took (flows.lua F.on_unit_trained)
     local rl = S.flows("recruit_last")
@@ -1977,21 +2282,58 @@ function S.map_model(faction, view)
         end
     end
     table.sort(m.dots, function(a, b) return a.name < b.name end)
-    for _, s in ipairs(S.ask("ships") or {}) do
+    local routes=DERPY_MR_TERRAIN_ROUTES
+    for _, s in ipairs((not routes or routes.shown('shipments')) and S.ask("ships") or {}) do
         if s.f == faction:name() then
-            local c = { lx = s.x, ly = s.y, s = s, a = at[s.from], b = at[s.to] }
+            -- Contract sources can belong to a partner; draw only their referenced endpoint.
+            if not at[s.from] then
+                local ok, r = pcall(function() return cm:get_region(s.from) end)
+                if ok and r and r.settlement and not r:is_null_interface() then
+                    local st = r:settlement()
+                    if not st:is_null_interface() then
+                        local d = { lx=st:logical_position_x(),ly=st:logical_position_y(),name=S.place(s.from),cap=false }
+                        d.ux,d.uy=u(st:display_position_x(),st:display_position_y())
+                        at[s.from]=d; m.dots[#m.dots+1]=d
+                    end
+                end
+            end
+            local c = { lx = s.x, ly = s.y, s = s }
             c.ux, c.uy = u(cm:log_to_dis(s.x, s.y))
             m.carts[#m.carts + 1] = c
         end
     end
-    -- the frame: every point drawn, its centre, and one scale that fits the padded box
-    local x0, y0, x1, y1
-    local function grow(x, y)
-        x0, y0 = math.min(x0 or x, x), math.min(y0 or y, y)
-        x1, y1 = math.max(x1 or x, x), math.max(y1 or y, y)
+    -- THE ROADS ARE THE 3D MAP'S (terrain_routes.lua): its links, its solved paths, its colours,
+    -- every third point as it draws them. No path yet, or none, draws nothing: never a straight line.
+    -- An agreement's own trade road first, as the 3D map draws it: the display search can take another
+    -- way and, never asked for that pair before, left the first open empty (seen in game 2026-10-22).
+    local R, roads, shared = DERPY_MR_TERRAIN_ROUTES, {}, {}
+    for _, link in ipairs(R and R.links(faction) or {}) do
+        local road = { colour = R.ink(link.owner), own = link.own }
+        local path = link.path or R.path(link.from, link.to) or {}
+        local visible = R.unshared(path, shared)
+        for i, point in ipairs(path) do
+            if visible[i] and i % 3 == 1 then road[#road + 1] = { u(R.sample(path,i)) } end
+        end
+        roads[#roads + 1] = road
     end
-    for _, d in ipairs(m.dots) do grow(d.ux, d.uy) end
-    for _, c in ipairs(m.carts) do grow(c.ux, c.uy) end
+    -- the frame: this realm's points and roads, its centre, and one scale that fits the padded box.
+    -- all: everything drawn, which the plain map's surface carries so a drag reaches a foreign road.
+    local x0, y0, x1, y1
+    local all = {}
+    local function grow(x, y, framed)
+        all[1], all[2] = math.min(all[1] or x, x), math.min(all[2] or y, y)
+        all[3], all[4] = math.max(all[3] or x, x), math.max(all[4] or y, y)
+        if framed then
+            x0, y0 = math.min(x0 or x, x), math.min(y0 or y, y)
+            x1, y1 = math.max(x1 or x, x), math.max(y1 or y, y)
+        end
+    end
+    for _, d in ipairs(m.dots) do grow(d.ux, d.uy, true) end
+    for _, c in ipairs(m.carts) do grow(c.ux, c.uy, true) end
+    for _, r in ipairs(roads) do
+        for _, point in ipairs(r) do grow(point[1], point[2], r.own) end
+    end
+    if not x0 then x0, y0, x1, y1 = all[1], all[2], all[3], all[4] end
     if not x0 then return m end
     local W, H = L.map[3], L.map[4]
     local fit = math.min((W - 2 * L.MAP_PAD) / math.max(x1 - x0, L.MAP_MIN_SPAN),
@@ -2028,21 +2370,21 @@ function S.map_model(faction, view)
         m.surface = { ax, ay, math.floor(a.w * scale + 0.5), math.floor(a.h * scale + 0.5) }
         m.su = { 0, 0 }
     else
-        local sx0, sy0 = px(x0, y0)
-        local sx1, sy1 = px(x1, y1)
+        local sx0, sy0 = px(all[1], all[2])
+        local sx1, sy1 = px(all[3], all[4])
         sx0, sy0 = math.min(0, sx0 - L.MAP_PAD), math.min(0, sy0 - L.MAP_PAD)
         sx1, sy1 = math.max(W, sx1 + L.MAP_PAD), math.max(H, sy1 + L.MAP_PAD)
         m.surface = { sx0, sy0, sx1 - sx0, sy1 - sy0 }
         m.su = { cx + (sx0 - W / 2) / scale, cy + (sy0 - H / 2) / scale }
     end
-    for _, c in ipairs(m.carts) do
-        c.x, c.y = px(c.ux, c.uy)
-        if c.a and c.b then
-            for k = 1, L.MAP_STEPS do
-                local f = k / (L.MAP_STEPS + 1)
-                local x, y = px(c.a.ux + (c.b.ux - c.a.ux) * f, c.a.uy + (c.b.uy - c.a.uy) * f)
-                m.path[#m.path + 1] = { x = x, y = y }
-            end
+    for _, c in ipairs(m.carts) do c.x, c.y = px(c.ux, c.uy) end
+    -- ponytail: the first MAP_PATH_MAX dots in R.links' order, this realm's roads first; space them
+    -- by on-screen distance instead if a crowded late game reaches the cap.
+    for _, r in ipairs(roads) do
+        for _, point in ipairs(r) do
+            if #m.path >= L.MAP_PATH_MAX then break end
+            local x, y = px(point[1], point[2])
+            m.path[#m.path + 1] = { x = x, y = y, colour = r.colour }
         end
     end
     return m
@@ -2050,7 +2392,7 @@ end
 
 function S.ship_tip(s)
     return S.num(s.n) .. " " .. S.name(s.stem) .. " from " .. S.place(s.from) .. " to " .. S.place(s.to)
-        .. ", arriving on turn " .. s.due .. ".\nClick to fly there."
+        .. ", arriving on turn " .. tostring(S.ask("ship_due", s) or s.due) .. ".\nClick to fly there."
 end
 
 -- SHOW: the camera flies to a shipment's cart, CA's way (wh3_dlc29_middenland_narrative), keeping
@@ -2068,17 +2410,21 @@ end
 -- ==========================================================================================
 S.PATH = "ui/campaign ui/"
 S.BUTTON = "derpy_mr_stores_button"
+S.ARMY_BUTTON = "derpy_mr_army_open"
 S.PANEL = "derpy_mr_stores_panel"
 S.CLOSE = "derpy_mr_close"
 S.BACK = "derpy_mr_back"
 S.TAB = { goods = "derpy_mr_tab_goods", settlements = "derpy_mr_tab_settlements",
           trade = "derpy_mr_tab_trade", spending = "derpy_mr_tab_spending", map = "derpy_mr_tab_map",
           workshop = "derpy_mr_tab_workshop" }
-S.MAP = { dot = "derpy_mr_mapdot_", cart = "derpy_mr_mapcart_", path = "derpy_mr_mappath_",
-          label = "derpy_mr_maplabel_" }
-S.MAP_FILE = { dot = "derpy_mr_stores_mapdot", cart = "derpy_mr_stores_mapcart", path = "derpy_mr_stores_mappath",
-               label = "derpy_mr_stores_maplabel" }
-S.map_made = { dot = 0, cart = 0, path = 0, label = 0 }   -- how many of each the panel holds
+S.MAP = { dot = "derpy_mr_mapdot_", cart = "derpy_mr_mapcart_", label = "derpy_mr_maplabel_" }
+S.MAP_FILE = { dot = "derpy_mr_stores_mapdot", cart = "derpy_mr_stores_mapcart", label = "derpy_mr_stores_maplabel" }
+S.map_made = { dot = 0, cart = 0, label = 0 }   -- how many of each the panel holds
+-- a road's dots: one template per colour terrain_routes.lua's R.colour hands out
+for n = 0, L.MAP_PATH_COLOURS - 1 do
+    S.MAP["path" .. n], S.MAP_FILE["path" .. n] = "derpy_mr_mappath" .. n .. "_", "derpy_mr_stores_mappath_" .. n
+    S.map_made["path" .. n] = 0
+end
 S.map_hits = {}                                           -- a map component's name -> where a click flies
 S.map_view = nil       -- after a zoom: {zoom, cx, cy} in map units; nil frames the map as it first was
 S.map_last = nil       -- the model last drawn, which a zoom reads its scale and surface off
@@ -2467,6 +2813,18 @@ function S.draw_rows(p, rows, heads, cols)
                     end
                 end
             end
+            for j, action in ipairs({ "minus", "auto", "plus" }) do
+                local button = find_uicomponent(r, S.POLICY .. action)
+                if is_uicomponent(button) then
+                    button:SetVisible(rc.policy ~= nil)
+                    if rc.policy then
+                        button:MoveTo(rx + cols[j + 2][1], ry + math.floor((L.PITCH - L.send[2]) / 2))
+                        label(button, ({ "-10", rc.route and "100" or "Auto", "+10" })[j])
+                        button:SetTooltipText(rc.tip, true)
+                        S.set_off(button, false)
+                    end
+                end
+            end
             -- Send here on a settlement's resources; Show on a Spending tab shipment
             local sb = find_uicomponent(r, S.SEND)
             if is_uicomponent(sb) then
@@ -2615,7 +2973,8 @@ end
 function S.draw_map(p, m)
     local px, py = p:Position()
     local bx, by = px + L.map[1], py + L.map[2]
-    local shown = { dot = 0, cart = 0, path = 0, label = 0 }
+    local shown = {}
+    for kind in pairs(S.MAP) do shown[kind] = 0 end
     S.map_hits = {}
     S.map_last = m
     -- the bottom line: the key, then Zoom out and Zoom in in slots 3 and 4
@@ -2676,7 +3035,7 @@ function S.draw_map(p, m)
     end
     if m then
         -- the road first, then the settlements, then the carts: each drawn over the one before
-        for _, d in ipairs(m.path) do place("path", d.x, d.y, L.MAP_PATH) end
+        for _, d in ipairs(m.path) do place("path" .. d.colour, d.x, d.y, L.MAP_PATH) end
         for _, d in ipairs(m.dots) do
             local c = place("dot", d.x, d.y, d.cap and L.MAP_CAP or L.MAP_DOT)
             if c then
@@ -2876,13 +3235,13 @@ end
 
 -- Reopening keeps the tab and drops the drill-down. Interactive only while visible: a hidden
 -- panel that still takes the mouse is a dead zone in the middle of the map.
-function S.show(on)
+function S.show(on, focus)
     local p = S.panel()
     if not is_uicomponent(p) then p = S.build() end
     if not is_uicomponent(p) then return end
     S.list_key = nil
     if on then
-        S.focus, S.map_view = nil, nil
+        S.focus, S.map_view = focus, nil
         p:SetVisible(true)
         S.layout(p)
         if not S.polling then
@@ -2912,12 +3271,12 @@ function S.zoom(step)
 end
 
 function S.is_mine(name)
-    return type(name) == "string" and (name == S.BUTTON or name == S.CLOSE or name == S.BACK
+    return type(name) == "string" and (name == S.BUTTON or name == S.ARMY_BUTTON or name == S.CLOSE or name == S.BACK
         or name == S.TAB.goods or name == S.TAB.settlements or name == S.TAB.trade or name == S.TAB.spending
         or name == S.TAB.map or name == S.TAB.workshop or S.map_hits[name] ~= nil
         or string.sub(name, 1, #S.ROW) == S.ROW or string.sub(name, 1, #S.SW) == S.SW
         or string.sub(name, 1, #S.BULK) == S.BULK or string.sub(name, 1, #S.ORDER) == S.ORDER
-        or name == S.SEND or name == S.SELL or name == S.ZOOM_IN or name == S.ZOOM_OUT)
+        or string.sub(name, 1, #S.POLICY) == S.POLICY or name == S.SEND or name == S.SELL or name == S.ZOOM_IN or name == S.ZOOM_OUT)
 end
 
 -- A SWITCH NAMES NO GOOD: its row does, so the row is read off the clicked component's parent.
@@ -2955,7 +3314,14 @@ function S.click_send(component)
     local row = UIComponent(UIComponent(component):Parent())
     local i = tonumber(string.match(row:Id() or "", "^derpy_mr_row_(%d+)$"))
     local rc = i and S.data[i]
+    if rc and rc.route_request and rc.send and not rc.send.off then return S.request(unpack(rc.route_request)) end
     if rc and rc.send and rc.send.look then return S.look_at(rc.send.look[1], rc.send.look[2]) end
+    if rc and rc.provisions and rc.send and not rc.send.off then
+        return S.request("provisions", rc.army, rc.provisions)
+    end
+    if rc and rc.economy and rc.send and not rc.send.off then
+        return S.request("economy", rc.region, rc.economy)
+    end
     -- the Workshop: Buy names its row, Buy here its row and settlement
     if rc and rc.work then
         if rc.open then
@@ -2981,7 +3347,40 @@ function S.click_send(component)
     if rc and rc.send and not rc.send.off then return S.request("send", rc.stem, S.focus) end
 end
 
+function S.click_policy(action, component)
+    if not component or not S.focus then return end
+    local row = UIComponent(UIComponent(component):Parent())
+    local i = tonumber(string.match(row:Id() or "", "^derpy_mr_row_(%d+)$"))
+    local rc = i and S.data[i]
+    if rc and rc.route and rc.policy then
+        local f = S.local_faction()
+        for _, o in ipairs(f and S.ask("routes", f) or {}) do
+            if o.id == rc.route then
+                local n = action == "auto" and 100 or o[rc.policy] + (action == "plus" and 10 or -10)
+                return S.request("route_edit",o.id,rc.policy,tostring(math.max(rc.policy == "batch" and 2 or 1,math.min(rc.policy == "batch" and 100 or 1000000,n))))
+            end
+        end
+        return
+    end
+    if S.view ~= "trade" then return end
+    if not rc or not rc.policy or rc.stem ~= S.focus then return end
+    local c = S.policy_context(rc.stem)
+    if not c then return end
+    local value = "auto"
+    if action ~= "auto" then
+        local n = c.policy[rc.policy]
+        if n == nil then
+            n = c[rc.policy]
+            n = action == "plus" and (math.floor(n / 10) * 10 + 10) or (math.ceil(n / 10) * 10 - 10)
+        else n = n + (action == "plus" and 10 or -10) end
+        value = tostring(math.max(0, math.min(1000000, n)))
+    end
+    return S.request("stock", rc.stem, rc.policy, value)
+end
+
 function S.click(name, component)
+    local policy_action = string.match(name, "^derpy_mr_policy_(%a+)$")
+    if policy_action == "minus" or policy_action == "auto" or policy_action == "plus" then return S.click_policy(policy_action, component) end
     if name == S.SEND then return S.click_send(component) end
     if S.map_hits[name] then return S.look_at(S.map_hits[name][1], S.map_hits[name][2]) end
     -- the model clamps the zoom, so a greyed button's click changes nothing
@@ -3001,6 +3400,14 @@ function S.click(name, component)
     if dir then return S.click_switch(dir, component) end
     local bdir, mode = string.match(name, "^derpy_mr_all_(%a+)_(%a+)$")
     if bdir then return S.click_bulk(bdir, mode) end
+    if name == S.ARMY_BUTTON then
+        local row = S.selected_army()
+        if row and not row.off then
+            S.view = "spending"
+            return S.show(true, "army:" .. row.id)
+        end
+        return
+    end
     if name == S.BUTTON then return S.show(not S.is_open()) end
     if name == S.CLOSE then return S.show(false) end
     if name == S.BACK then
@@ -3077,7 +3484,59 @@ end
 -- The strip sizes to its content mid-turn, with no event for it, so the button follows. It
 -- only MOVES: the hub hides it off the main screen and gives it back, and a re-show here would
 -- fight that hide three times a second.
+function S.selected_army()
+    local cqi, f = S.selected(), S.local_faction()
+    if not cqi or not f then return nil end
+    local ch = cm:get_character_by_cqi(cqi)
+    if not ch or ch:is_null_interface() or ch:faction():name() ~= f:name() or not ch:has_military_force() then return nil end
+    local force = ch:military_force()
+    if not S.ask("provision_force", f, force) or force:general_character():command_queue_index() ~= cqi then return nil end
+    local id = tostring(force:command_queue_index())
+    if not (S.ask("rates") or {}).army_provisions then return {id=id,off=true} end
+    for _, row in ipairs(S.ask("provision_rows", f) or {}) do if row.id == id then return row end end
+end
+
+function S.army_button_poll()
+    local root = S.root()
+    local button = find_uicomponent(root, S.ARMY_BUTTON)
+    local row = not S.is_open() and S.selected_army()
+    local group = find_uicomponent(root, "button_group_army")
+    if not row or not is_uicomponent(group) or not group:Visible(true) then
+        if is_uicomponent(button) and button:Visible() then
+            button:SetVisible(false)
+            if is_uicomponent(group) then group:Layout() end
+        end
+        return
+    end
+    local changed = not is_uicomponent(button) or not button:Visible()
+    if not is_uicomponent(button) then
+        local template = find_uicomponent(group, "button_recruitment")
+        if not is_uicomponent(template) then return end
+        button = UIComponent(template:CopyComponent(S.ARMY_BUTTON))
+        button:SetImagePath("ui/skins/default/derpy_mr_provisions.png", 0)
+    end
+    button:SetVisible(true)
+    S.set_off(button,row.off==true)
+    local tip = row.off and "Provisions\nDisabled in this campaign's saved settings. New campaigns default to enabled."
+        or ("Provisions\nNeeded per turn: " .. row.need .. " common provisions\nCarried: " .. row.held .. " / " .. row.cap
+            .. "\nTo five-meal target: " .. math.max(0,row.need * 5-row.held)
+            .. "\nMissed meals: " .. row.short .. "\n" .. row.reason .. "\n" .. S.ARMY_TIP)
+    local count = row.off and "-" or S.num(row.need)
+    if button:GetStateText() ~= count then
+        local state = button:CurrentState()
+        for i = 0, button:NumStates() - 1 do
+            button:SetState(button:GetStateByIndex(i))
+            button:SetStateText(count)
+            button:SetTextHAlign("right");button:SetTextVAlign("bottom")
+        end
+        button:SetState(state)
+    end
+    button:SetTooltipText(tip,true)
+    if changed then group:Layout() end
+end
+
 function S.follow_bar()
+    S.army_button_poll()
     if not S.placed or S.hubbed() then return end
     local b = find_uicomponent(S.root(), S.BUTTON)
     if not is_uicomponent(b) then return end
@@ -3255,6 +3714,9 @@ end
 function S.init()
     if S.started then return end
     S.started = true
+    core:add_listener('derpy_mr_stores_roads', 'DerpyMRTerrainRoutesUpdated',
+        function() return S.view == 'map' and S.is_open() end,
+        function() local ok, err = pcall(S.refresh); if not ok then S.say(err) end end, true)
     local ok, err = pcall(S.place_button, 1)
     if not ok then S.say(err) end
     cm:repeat_real_callback(function() pcall(S.follow_bar) end, S.FOLLOW_MS, "derpy_mr_follow_bar")

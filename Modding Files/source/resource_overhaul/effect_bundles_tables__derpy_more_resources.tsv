@@ -37,6 +37,10 @@ derpy_mr_hold_pearls	[hidden]	[hidden]	faction	1		true	false	true
 derpy_mr_hold_starwood	[hidden]	[hidden]	faction	1		true	false	true
 derpy_mr_hold_feathers	[hidden]	[hidden]	faction	1		true	false	true
 derpy_mr_hold_wyvern_scales	[hidden]	[hidden]	faction	1		true	false	true
+derpy_mr_hold_hardtack	[hidden]	[hidden]	faction	1		true	false	true
+derpy_mr_hold_leather	[hidden]	[hidden]	faction	1		true	false	true
+derpy_mr_hold_cloth	[hidden]	[hidden]	faction	1		true	false	true
+derpy_mr_hold_tools	[hidden]	[hidden]	faction	1		true	false	true
 derpy_mr_hold_animals	[hidden]	[hidden]	faction	1		true	false	true
 derpy_mr_hold_dyes	[hidden]	[hidden]	faction	1		true	false	true
 derpy_mr_hold_gems	[hidden]	[hidden]	faction	1		true	false	true
@@ -57,6 +61,14 @@ derpy_mr_hold_trinkets	[hidden]	[hidden]	faction	1		true	false	true
 derpy_mr_well_fed	After eating, this settlement's stores still hold five turns of provisions.	Well fed	region	1	growth.png	true	false	true
 derpy_mr_garrison_stocked	War materials fill at least a quarter of one store's space in this settlement.	Garrison stocked	region	1	siege_defence.png	true	false	true
 derpy_mr_comforts	Luxuries fill at least a quarter of one store's space in this settlement.	Comforts	region	1	public_order_happy.png	true	false	true
+derpy_mr_service_archives	Paid each turn from this province capital's stores. Province growth +5.	Scholars' halls	region	1	growth.png	true	false	true
+derpy_mr_service_builders	Paid each turn from this province capital's stores. Province construction cost -5%.	Builders' yards	region	1	construction.png	true	false	true
+derpy_mr_service_feasts	Paid each turn from this province capital's stores. Province control +2.	Village feasts	region	1	public_order_happy.png	true	false	true
+derpy_mr_service_halls	Paid each turn from this province capital's stores. Province control +2.	Drinking halls	region	1	public_order_happy.png	true	false	true
+derpy_mr_service_hospital	Paid each turn from this province capital's stores. Own armies in the province: replenishment +3%.	Field hospitals	region	1	replenishment.png	true	false	true
+derpy_mr_service_mess	Paid each turn from this province capital's stores. Province control +2.	Factory mess	region	1	public_order_happy.png	true	false	true
+derpy_mr_service_records	Paid each turn from this province capital's stores. Province growth +5.	Civic records	region	1	growth.png	true	false	true
+derpy_mr_service_tea	Paid each turn from this province capital's stores. Province control +2.	Tea houses	region	1	public_order_happy.png	true	false	true
 derpy_mr_event_feast	A feast paid for from this settlement's stores: public order and growth are up.	Feast	region	1	public_order_jubilant.png	true	false	true
 derpy_mr_event_siege	This settlement's stores feed its besieged garrison.	Siege Stores	region	1	siege_defence.png	true	false	true
 derpy_mr_event_restore	Repaired from this settlement's own stores: public order is up.	Restored	region	1	public_order_happy.png	true	false	true
@@ -74,6 +86,8 @@ derpy_mr_up_wyvern_scales	Built from your stores: upkeep -5% for your armies her
 derpy_mr_order_festival	Paid for from your stores: public order +4 in every province.	Festival	faction	1	public_order_jubilant.png	true	false	true
 derpy_mr_order_muster	Paid for from your stores: recruit rank +1 for every unit.	Muster	faction	1	experience.png	true	false	true
 derpy_mr_order_great_works	Paid for from your stores: construction cost -20% for every building.	Great Works	faction	1	construction.png	true	false	true
+derpy_mr_army_hungry	Two missed meals. Refill locally or buy field rations where available.	Short rations	force	1	growth.png	false	false	true
+derpy_mr_army_starved	Three or more missed meals. A full meal clears these penalties.	Empty provision wagons	force	1	growth.png	false	false	true
 derpy_mr_rc_army_ammo	Paid for from your stores: ammunition +20%, 5 turns.	Ammunition Train	force	1	ammo.png	false	false	true
 derpy_mr_rc_army_forge	Paid for from your stores: armour +15, 5 turns.	Field Forge	force	1	armour.png	false	false	true
 derpy_mr_rc_army_remounts	Paid for from your stores: replenishment +10%, 5 turns.	Remounts	force	1	replenishment.png	false	false	true

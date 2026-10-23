@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026-10-23
+
+- Carts and boats drive the trade roads, in the supplier's own style: nine kinds of cart, 23 ship styles.
+- Each carries an icon of the good it moves; empty returns carry none.
+- A cart only shows a good that will really move.
+- Import and export carts keep to opposite sides of the road.
+- Up to sixteen in view; every road gets one before any road gets a second.
+- Roads with the same two ends draw as one, carrying all their goods.
+- Nearby roads join into shared corridors sooner.
+- MCT: switches to show or hide agreements, contracts, shipments, carts and icons.
+- A resource's import or export switch also stops its carts.
+- Trade reach worked out faster, and again at once after a war, a peace, a diplomatic event or a settlement changing hands.
+
+## 2026-10-22
+
+- Trade roads drawn as dashes in four owner colours.
+- Roads go round land hostile to either side.
+- Trade reach (MCT, default 6 turns): an agreement whose road is too long or cut off by enemy land moves no goods and no duty.
+- MCT: line size and line colours, a colour-blind friendly set among them.
+- Shipments follow their saved road on the map each turn.
+
+## 2026-10-21
+
+- Trade roads drawn on the campaign map and in the Vault's Map tab.
+- Four new goods: Hardtack, Leather, Cloth and Tools, 58 in the stores.
+- Nine recipes and eight services, Builders' yards and Field hospitals among them.
+- New armies start with five meals of food, half of what they can carry.
+- Vampire Counts and Vampire Coast eat no meals.
+- Grain on every farm, Salted Meat on every hunting lodge; six races get Salted Meat from their main settlements.
+- Field rations: an army at sea or with no settlements can buy two meals, 10 gold each.
+- Provisions button has its own icon.
+- Fixed: the Settlements view showed the wrong benefit for some services.
+
+## 2026-10-20
+
+- Processing: brewing, meat preservation, powder mixing, printing and carpet weaving turn stored goods into others.
+- Province services: drinking halls, civic records, tea houses, village feasts, scholars' halls, factory mess.
+- Army provisions: armies carry food, load it in their own settlements and go hungry without it. On for new campaigns.
+- Provisions button on the army bar.
+- Computer factions send paid food carts to their hungry armies.
+- Shipments take 1 to 6 turns by distance, at most 100 goods a cart.
+- Recurring orders, and paid contracts with trade partners.
+
+## 2026-10-19
+
+- Keep and Target per resource, with automatic defaults: five turns of use kept, ten turns imported.
+- Trade, Send here and supplies never take what you keep.
+- Tooltips forecast how long a store lasts.
+
 ## 2026-10-12
 
 - Fixed: a Workshop unit bought straight into an army made the next ordinary recruit of that unit free.

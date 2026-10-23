@@ -130,6 +130,7 @@ core = {
 
 dofile("__SCRIPT__")
 local S = DERPY_MR_STORES
+assert(type(S.army_button_poll) == "function", "selected-lord provisions button is missing")
 
 -- ---- the model ----------------------------------------------------------------------------
 -- parse_made: each good's rows summed, the capacity effect and other mods' effects skipped
@@ -142,6 +143,8 @@ eq(next(S.parse_made("")), nil, "empty read"); eq(next(S.parse_made(nil)), nil, 
 -- read_realm: name order; null pools and other mods' pools skipped; an old save has no space
 local realm = S.read_realm(FACTIONS.fac_a)
 eq(#realm, 3, "settlements"); eq(realm[1].name, "Alpha", "first by name"); eq(realm[3].name, "Charlie", "last")
+eq(realm[1].made_known, true, "successful production read is known")
+eq(realm[3].made_known, nil, "failed production read stays unknown")
 eq(realm[1].cap, 400, "Alpha space"); eq(realm[1].held.coal, 100, "Alpha coal")
 eq(realm[1].made.brimstone, 6, "Alpha makes brimstone"); eq(realm[1].level, 2, "Alpha level")
 eq(realm[1].held.wh3_dlc27_sla_thralls_region, nil, "a pool that is not a store")
@@ -276,8 +279,11 @@ function UIC:SetStateText(t) self.texts[self.state] = t; if self.state == "stand
 function UIC:GetStateText() return self.texts[self.state] or "" end
 function UIC:SetState(s) self.state = s end
 function UIC:CurrentState() return self.state end
+function UIC:NumStates() return 3 end
+function UIC:GetStateByIndex(i) return ({"standard","hover","selected"})[i+1] end
 function UIC:SetTooltipText(t) self.tip = t end
 function UIC:SetTextHAlign(a) self.halign = a end
+function UIC:SetTextVAlign(a) self.valign = a end
 -- not the panel's own 6.5 a letter, so a name spaced by that budget instead of measured shows up
 function UIC:WidthOfTextLine(t) return math.ceil(string.len(t or "") * 7.25) end
 function UIC:SetOpacity(o) self.opacity = o end
@@ -734,7 +740,44 @@ press(find_uicomponent(find("derpy_mr_row_1"), "c3")); eq(#SENT, 2, "a cell name
 -- a greyed row's name cell carries grey markup; its switch's tooltip names the good plainly
 eq(string.find(cell(4, 1).text, "[[col:", 1, true) ~= nil, true, "row 4 is a greyed good")
 eq(string.find(switch(4, "import").tip, "[[col:", 1, true), nil, "its Imports tooltip carries no colour markup")
-click("derpy_mr_row_1"); eq(find("sub_title").text, "What your settlements trade", "a Trade row opens nothing")
+-- Dedicated row controls use requests and re-read the current policy at click time.
+;(function()
+    local fl = DERPY_MR_FLOWS
+    local policy, requests = {}, {}
+    fl.capital = function() return A end
+    fl.stock_view = function(f, r) return { faction = f, region = r, policy = { coal = policy },
+        auto_keep = { war = 105 }, auto_target = { war = 200 }, work_target = {}, capacity = { coal = 400 },
+        held = { coal = 100 }, incoming = {}, totals = { war = 100 }, due = {} } end
+    fl.import_need = function() return 100 end
+    fl.request = function(fk, action, stem, field, value)
+        eq(fk, LOCAL, "policy request faction"); eq(action, "stock", "policy action")
+        eq(stem, "coal", "policy good")
+        requests[#requests + 1] = field .. "|" .. value
+        policy[field] = value ~= "auto" and tonumber(value) or nil
+    end
+    click("derpy_mr_row_1")
+    eq(find("sub_title").text, "Stock rules: Coal", "Trade row opens stock rules")
+    eq(S.view_key(), "trade_focus", "own policy columns")
+    eq(cell(1, 2).text, "Auto: 105", "resolved shared Auto")
+    eq(string.find(S.data[1].tip, "shared", 1, true) ~= nil, true, "category explanation")
+    local function pb(i, action) return find_uicomponent(find("derpy_mr_row_" .. i), "derpy_mr_policy_" .. action) end
+    eq(pb(1, "plus").visible, true, "policy button visible")
+    eq(pb(3, "plus").visible, false, "other row hides policy controls")
+    dump("trade_focus")
+    press(pb(1, "minus")); eq(policy.keep, 100, "Auto minus rounds down to ten")
+    press(pb(1, "auto")); eq(policy.keep, nil, "Auto reset")
+    press(pb(1, "plus")); eq(policy.keep, 110, "Auto plus rounds up to ten")
+    policy.keep = 0; S.refresh(); eq(cell(1, 2).text, "0", "explicit zero differs from Auto")
+    press(pb(1, "minus")); eq(policy.keep, 0, "zero clamp")
+    policy.keep = 1000000; press(pb(1, "plus")); eq(policy.keep, 1000000, "upper clamp")
+    local count = #requests
+    S.view_model(S.read_realm(FACTIONS.fac_a)); S.view_model(S.read_realm(FACTIONS.fac_a))
+    eq(#requests, count, "repeated reads do not write")
+    click("derpy_mr_back"); eq(S.focus, nil, "Back returns to Trade")
+    eq(pb(1, "plus").visible, false, "ordinary rows hide policy buttons")
+    press(pb(1, "plus")); eq(#requests, count, "stale control cannot write")
+    fl.capital, fl.stock_view, fl.import_need, fl.request = nil, nil, nil, nil
+end)()
 -- THE SECTION ROW FOLDS: a click hides the resources you do not have, another shows them again
 eq(find("derpy_mr_row_3").tip, S.FOLD_TIP[false], "the section row says a click hides them")
 local function arrow(i) return find_uicomponent(find("derpy_mr_row_" .. i), "fold") end
@@ -764,23 +807,33 @@ do
     -- IMPORT DUTY: a first row with last turn's gold each way, its partners in the tooltip
     local fl = DERPY_MR_FLOWS
     local pct, stores = 12, true                -- not the default 10: the tooltip must carry the rate
-    fl.rates = function() return { duty = pct } end
+    fl.rates = function() return { duty = pct, reach = 7 } end   -- not the default 6: the tooltip must carry it
     fl.uses_stores = function(f) eq(f:name(), LOCAL, "asked of the local faction"); return stores end
     fl.duty_last = function(fk)
         eq(fk, LOCAL, "the local faction's duty"); return { paid = 11, got = 4, by = { fac_b = { paid = 11, got = 4 } } }
     end
+    -- TRADE REACH: the partners whose agreement moves nothing, and why (flows.lua F.cut_off)
+    local cut = { { key = "fac_c", why = "Too far for trade" }, { key = "fac_d", why = "Cut off by enemy lands" } }
+    fl.cut_off = function(f) eq(f:name(), LOCAL, "cut off from the local faction"); return cut end
     click("derpy_mr_tab_trade")
-    dump("trade")   -- the preview draws the tab with its duty row (overwrites the plain dump)
+    dump("trade")   -- the preview draws the tab with its duty and cut-off rows (overwrites the plain dump)
     eq(cell(1, 1).text, "Import duty", "the duty row comes first"); eq(cell(1, 5).text, "paid 11, received 4", "both ways")
     eq(string.find(find("derpy_mr_row_1").tip, ": paid 11, received 4", 1, true) ~= nil, true, "each partner in its tooltip")
     eq(string.find(find("derpy_mr_row_1").tip, "12%", 1, true) ~= nil, true, "with the rate")
     eq(switch(1, "export").visible or switch(1, "import").visible, false, "and no switches")
-    eq(cell(2, 1).text, "Coal", "the goods follow")
+    eq(cell(2, 1).text, "Trade cut off", "then the partners cut off"); eq(cell(2, 5).text, "2 partners", "counted")
+    local tip = find("derpy_mr_row_2").tip
+    eq(string.find(tip, ": Too far for trade", 1, true) ~= nil and string.find(tip, ": Cut off by enemy lands", 1, true) ~= nil,
+       true, "each with why"); eq(string.find(tip, "7 turns", 1, true) ~= nil, true, "and the reach")
+    eq(switch(2, "export").visible or switch(2, "import").visible, false, "no switches on it either")
+    eq(cell(3, 1).text, "Coal", "the goods follow")
+    cut = { cut[1] }; click("derpy_mr_tab_trade"); eq(cell(2, 5).text, "1 partner", "one is one partner")
+    cut = {}; click("derpy_mr_tab_trade"); eq(cell(2, 1).text, "Coal", "nobody cut off, no row")
     fl.duty_last = function() return nil end; click("derpy_mr_tab_trade")
     eq(cell(1, 5).text, "paid 0, received 0", "nothing booked yet reads as nothing")
     stores = false; click("derpy_mr_tab_trade"); eq(cell(1, 1).text, "Coal", "no row for a faction that never pays it")
     stores, pct = true, 0; click("derpy_mr_tab_trade"); eq(cell(1, 1).text, "Coal", "no row while the duty is off")
-    fl.rates, fl.duty_last, fl.uses_stores = nil, nil, nil; click("derpy_mr_tab_trade")
+    fl.rates, fl.duty_last, fl.uses_stores, fl.cut_off = nil, nil, nil, nil; click("derpy_mr_tab_trade")
 end
 -- ALL AT ONCE: four buttons under the list, on the Trade tab only
 local function bulk(dir, mode) return find("derpy_mr_all_" .. dir .. "_" .. mode) end
@@ -857,6 +910,36 @@ eq(find("sub_title").text, "Stores of Alpha", "Alpha's stores")
 local function sendb(i) return find_uicomponent(find("derpy_mr_row_" .. i), "derpy_mr_sendhere") end
 eq(sendb(1).visible, true, "a Send here button"); eq(sendb(1).text, "Send here", "labelled")
 dump("settlement_focus")
+-- The existing settlement rows also carry paid processing/service controls.
+do
+    local fl, owned_before = DERPY_MR_FLOWS, DERPY_MR_FLOWS.owned
+    fl.owned = function(_f, key) if key == "reg_a" then return A end end
+    fl.economy_rows = function(_f, region)
+        eq(region:name(), "reg_a", "economy reads selected local settlement")
+        return {
+            { key = "brew", on = true, open = true, paid = true,
+              definition = { label = "Brewing", cost = { grain = 12 }, output = { "beer", 8 } } },
+            { key = "halls", on = false, open = true, ready = false, short = "Short of pipeweed",
+              definition = { label = "Drinking halls", cost = { beer = 4, pipeweed = 1 },
+                    benefit = "Province control +2", value = 2, effect = "wh_main_effect_public_order_events" } },
+        }
+    end
+    S.refresh()
+    eq(S.data[2].economy, "brew", "recipe row retains validated key")
+    eq(S.data[2].send.label, "Pause", "active recipe can pause")
+    eq(S.data[3].send.label, "Enable", "service starts disabled")
+    eq(S.data[3][2], "4 + 1 / turn", "recurring full basket shown")
+    eq(string.find(S.data[2].tip, "Passive building production is unchanged") ~= nil, true, "additional batch explained")
+    local n = #REQ
+    press(sendb(2))
+    eq(REQ[#REQ], LOCAL .. "|economy|reg_a|brew", "recipe button uses synchronized request door")
+    eq(#REQ, n + 1, "one click sends one request")
+    dump("economy")
+    table.remove(REQ)
+    fl.economy_rows, fl.owned = nil, owned_before
+    S.refresh()
+end
+
 eq(sendb(1).x, find("derpy_mr_row_1").x + LL.VIEWS.focus[5][1], "in the fifth column")
 eq(sendb(1).disabled, false, "live when something can come"); eq(sendb(1).shader, "normal_t0", "and drawn live")
 eq(sendb(1).tip, "Ship 12 Coal from Bravo: 10 arrive in 2 turns, 2 are lost on the way. An army at war "
@@ -1084,6 +1167,27 @@ POS.reg_a, POS.reg_b = { 100, 300 }, { 300, 100 }
 CAPS = { "reg_a" }
 SHIPS = { { id = "derpy_mr_ship_1", f = LOCAL, stem = "coal", n = 22, from = "reg_b", to = "reg_a", due = 52, leg = 2,
             x = 110, y = 290 } }
+-- THE ROADS ARE THE 3D MAP'S (terrain_routes.lua, 2026-10-21): every link it draws, on its solved
+-- path, in its colour. Here the convoy's road, bent off the straight line, and a foreign treaty
+-- road far to the east that the realm's frame must not chase.
+local ROAD, FAR = {}, {}
+for i = 0, 20 do ROAD[#ROAD + 1] = { 300 - 10 * i, 100 + 10 * i + ((i > 0 and i < 20) and 20 or 0) } end
+for i = 0, 29 do FAR[#FAR + 1] = { 2000 + 10 * i, 100 } end
+local MINE = { owner = LOCAL, from = "reg_b", to = "reg_a", own = true }
+local THEIRS = { owner = "fac_far", from = "reg_x", to = "reg_y", own = false }
+ROUTE_LINKS = { MINE, THEIRS }
+DERPY_MR_TERRAIN_ROUTES = {
+    links = function(f) eq(f:name(), LOCAL, "the 3D map's links, asked for the viewer"); return ROUTE_LINKS, {} end,
+    path = function(a, b) return ({ reg_b = ROAD, reg_x = FAR })[a] end,
+    ink = function(owner) return owner == LOCAL and 2 or 1 end,
+}
+local terrain_file = assert(io.open('__UIDIR__/derpy_more_resources_terrain_routes.lua'))
+local terrain_source = terrain_file:read('*a')
+terrain_file:close()
+local helpers='local R = {}\n'
+for _,name in ipairs({'corner','sample','unshared','shown'}) do helpers=helpers..assert(terrain_source:match('function R.'..name..'%b().-\nend'))..'\n' end
+local real_helpers=assert(loadstring(helpers..'return R'))()
+for name,fn in pairs(real_helpers) do DERPY_MR_TERRAIN_ROUTES[name]=fn end
 click("derpy_mr_tab_map")
 eq(find("derpy_mr_tab_map").text, "Map", "a fifth tab")
 eq(find("derpy_mr_frame_t").visible or find("derpy_mr_frame_head").visible, false, "no table frame on the map")
@@ -1121,15 +1225,70 @@ eq(inside(cart), true, "inside the box")
 eq(math.abs(cart.x + cart.w / 2 - (da.x + da.w / 2)) < 40, true, "near Alpha, where it is now")
 eq(string.find(cart.tip, "22 Coal from Bravo to Alpha", 1, true) ~= nil, true, "what it carries, from and to")
 eq(string.find(cart.tip, "turn 52", 1, true) ~= nil, true, "and when it arrives")
-local path = 0
-for i = 1, 50 do
-    local c = mapc("path", i)
-    if c and c.visible then
-        path = path + 1
-        eq(c.x > da.x and c.x < db.x + db.w, true, "a path dot between the two settlements")
+local function road(colour, each)
+    local n, i = 0, 1
+    while mapc("path" .. colour, i) do
+        local c = mapc("path" .. colour, i)
+        if c.visible then n = n + 1; if each then each(c) end end
+        i = i + 1
     end
+    return n
 end
-eq(path, LL.MAP_STEPS, "a dotted line from where it left to where it goes")
+local bent = false
+local ax, ay, bx, by = da.x + da.w / 2, da.y + da.h / 2, db.x + db.w / 2, db.y + db.h / 2
+eq(road(2, function(c)
+    eq(c.x > da.x and c.x < db.x + db.w, true, "a road dot between the two settlements")
+    local cx, cy = c.x + c.w / 2, c.y + c.h / 2
+    bent = bent or cy < ay + (by - ay) * (cx - ax) / (bx - ax) - 4
+end), 7, "the convoy's road: every third point of its path, in the realm's colour")
+eq(bent, true, "on the solved path, not the straight line between the two")
+eq(road(1), 10, "the foreign road too, in its owner's colour")
+eq(road(0) + road(3), 0, "and no colour the 3D map did not give them")
+local reverse_road = {}
+for i = #ROAD, 1, -1 do reverse_road[#reverse_road+1] = ROAD[i] end
+ROUTE_LINKS = {MINE, {owner='fac_far',path=reverse_road}, THEIRS}
+click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+eq(road(2), 7, "shared trunk keeps the first route's colour")
+eq(road(1), 10, "reverse shared route adds no overlapping Vault dots")
+ROUTE_LINKS = {MINE, THEIRS}
+-- another colour set (MCT): the same road in a palette colour past the first set's four
+local first_ink = DERPY_MR_TERRAIN_ROUTES.ink
+DERPY_MR_TERRAIN_ROUTES.ink = function(owner) return owner == LOCAL and 2 or 13 end
+click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+eq(road(13), 10, "a later colour set: the foreign road in its own template")
+eq(road(1), 0, "and no longer in the first set's colour")
+DERPY_MR_TERRAIN_ROUTES.ink = first_ink
+click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+-- AN AGREEMENT'S OWN TRADE ROAD (trade reach's link.path), as the 3D map draws it, before the display
+-- search: 12 points draw 4 dots where the search's 30 draw 10
+THEIRS.path = {}
+for i = 0, 11 do THEIRS.path[#THEIRS.path + 1] = { 2000 + 10 * i, 300 } end
+click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+eq(road(1), 4, "an agreement's own trade road, not the display search's")
+THEIRS.path = nil
+click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+local gap0 = db.x - da.x
+ROUTE_LINKS = { MINE }; click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+eq(mapc("dot", 2).x - mapc("dot", 1).x, gap0, "framed on the realm: a far foreign road does not shrink it")
+eq(road(1), 0, "a road the 3D map no longer draws is hidden")
+ROUTE_LINKS = { MINE, THEIRS }; click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+local surface = find("derpy_mr_map_art")
+road(1, function(c)
+    eq(c.x >= surface.x and c.x + c.w <= surface.x + surface.w, true, "the plain map's surface carries the far road, so a drag reaches it")
+end)
+-- no path yet (still being worked out, or none at all): nothing, never a straight line instead
+local solved = DERPY_MR_TERRAIN_ROUTES.path
+DERPY_MR_TERRAIN_ROUTES.path = function() return nil end
+click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+eq(road(1) + road(2), 0, "no solved path, no road")
+eq(mapc("cart", 1).visible, true, "the convoy is still drawn where it is")
+-- A CROWDED MAP: at most MAP_PATH_MAX dots, the realm's road first
+DERPY_MR_TERRAIN_ROUTES.path = solved
+for i = 30, 3 * LL.MAP_PATH_MAX do FAR[#FAR + 1] = { 2000 + 10 * i, 100 } end
+click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+eq(road(2), 7, "the realm's road keeps every dot"); eq(road(1), LL.MAP_PATH_MAX - 7, "the rest go to the foreign road, up to the most")
+for i = #FAR, 31, -1 do FAR[i] = nil end
+click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
 press(cart)
 eq(CAMERA[1], 110 * 2, "a click on the cart flies the camera to it"); eq(CAMERA[2], 290 * 2, "both co-ordinates")
 eq(find("derpy_mr_stores_panel").visible, false, "and closes the panel")
@@ -1212,7 +1371,7 @@ for _, key in ipairs({ "wh3_main_combi", "cr_combi_expanded", "wh3_main_chaos" }
     eq(clip.w, box[3], "its width"); eq(clip.h, box[4], "its height")
     eq(find_uicomponent(clip, "derpy_mr_map_art") ~= false, true, "inside the box that cuts it")
     -- EVERYTHING ON THE PICTURE IS IN IT: drawn over it, cut with it, and dragged with it
-    for _, kind in ipairs({ "dot", "label", "path", "cart" }) do
+    for _, kind in ipairs({ "dot", "label", "path2", "cart" }) do
         if mapc(kind, 1) then eq(find_uicomponent(a, "derpy_mr_map" .. kind .. "_1") ~= false, true, "the " .. kind .. "s ride on the picture") end
     end
     eq(a.x <= clip.x and a.x + a.w >= clip.x + clip.w, true, "the picture fills the box across, no blank past its edge")
@@ -1368,7 +1527,7 @@ RADAR_OFF, S.frame = false, nil
 -- TWO SETTLEMENTS CLOSE TOGETHER BY THE MAP'S SOUTH EDGE: zoomed only as far as the picture has
 -- detail for, and the view kept on the picture rather than showing the blank below it
 POS.reg_a, POS.reg_b = { 600, 30 }, { 612, 22 }
-local ships0 = SHIPS; SHIPS = {}
+local ships0, links0 = SHIPS, ROUTE_LINKS; SHIPS, ROUTE_LINKS = {}, {}
 CAMPAIGN = "wh3_main_combi"; S.frame = nil; click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
 local ea, eclip = art(), find("derpy_mr_map_clip")
 eq(ea.w, 1440 * LL.MAP_ART_ZOOM, "a tight cluster is drawn at the closest zoom, no closer")
@@ -1376,7 +1535,7 @@ eq(ea.y + ea.h >= eclip.y + eclip.h, true, "and the picture still reaches the bo
 eq(ea.y + ea.h - (eclip.y + eclip.h) <= 1, true, "its own foot on the box's: the view went no further south")
 on_place(ea, mapc("dot", 2), "reg_b", "by the edge, Bravo")
 POS.reg_a, POS.reg_b = { 100, 300 }, { 300, 100 }
-SHIPS = ships0; S.frame = nil
+SHIPS, ROUTE_LINKS = ships0, links0; S.frame = nil
 CAMPAIGN = "some_mod_map"; click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
 eq(art().images[0], S.NO_ART, "back on an unknown map, the picture goes")
 CAMPAIGN = "wh3_main_combi"; click("derpy_mr_tab_goods")
@@ -1387,7 +1546,12 @@ FACTIONS.fac_a = faction("fac_a", { A }); SHIPS = {}
 click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
 eq(mapc("dot", 1).visible, true, "one settlement still draws"); eq(inside(mapc("dot", 1)), true, "inside the box")
 eq(mapc("dot", 2).visible, false, "the second dot is hidden, not left behind")
-eq(mapc("cart", 1).visible, false, "no convoy, no cart"); eq(mapc("path", 1).visible, false, "and no path")
+eq(mapc("cart", 1).visible, false, "no convoy, no cart")
+ROUTE_LINKS = {}; click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+eq(mapc("path2", 1).visible or mapc("path1", 1).visible, false, "and no road")
+DERPY_MR_TERRAIN_ROUTES = nil; click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+eq(mapc("dot", 1).visible, true, "with no route script the settlements still draw")
+eq(mapc("path2", 1).visible or mapc("path1", 1).visible, false, "and no road at all")
 eq(#ERRORS, 0, "no errors drawing the map")
 -- leaving the map hides it all
 click("derpy_mr_tab_goods")
@@ -1835,5 +1999,113 @@ for view, name in pairs(S.TAB) do
     end
 end
 
+do
+    local fl = DERPY_MR_FLOWS
+    DERPY_MR_FLOWS = { rates = function() return {actions=true,army_provisions=true} end, provision_rows = function()
+        return {{id="801", held=25, cap=50, need=5, short=0, auto=true, source=A, reason="Local stores above Keep"}}
+    end, request=function(f,...) REQ[#REQ+1]=f .. "|" .. table.concat({...},"|") end }
+    local view, focus = S.view, S.focus
+    S.view, S.focus = "spending", "army:801"
+    S.refresh()
+    eq(S.data[1][2], "25 / 50", "army cargo and capacity")
+    eq(S.data[1][4], "5 turns", "army cover")
+    eq(S.data[1].send.label,"Pause","army auto toggle")
+    local n=#REQ
+    press(sendb(2))
+    eq(REQ[#REQ],LOCAL .. "|provisions|801|load","army load uses synchronized door")
+    eq(#REQ,n+1,"one army request")
+    table.remove(REQ)
+    dump("army")
+    DERPY_MR_FLOWS.provision_rows=function()
+        return {{id="801",held=0,cap=50,need=5,short=2,auto=true,mobile=true,buy=10,price=100,
+            reason="Field rations: 10 for 100 gold. Load to buy."}}
+    end
+    S.refresh()
+    eq(S.data[2][1],"Buy field rations","mobile purchase is explicit")
+    eq(S.data[2][3],"100 gold","field price is visible")
+    eq(S.data[2].send.label,"Buy","field action names its payment")
+    eq(S.data[2].send.off,false,"mobile army may buy without local store")
+    eq(S.data[3].send.off,true,"mobile army cannot unload remotely")
+    dump("army_mobile")
+    DERPY_MR_FLOWS,S.view,S.focus=fl,view,focus
+    S.refresh()
+end
+
+do
+    local fl, view, focus = DERPY_MR_FLOWS, S.view, S.focus
+    local prior_local=LOCAL; LOCAL="fac_a"
+    local order={id="77",from="reg_b",to="reg_a",stem="coal",seller=LOCAL,target=100,batch=100,enabled=true,price=3}
+    local f=FACTIONS[LOCAL]
+    local partners=f.factions_trading_with
+    local regions=f.region_list
+    f.region_list=function() return list({A,B}) end
+    f.factions_trading_with=function() return list({}) end
+    DERPY_MR_FLOWS={rates=function() return {actions=true} end,request=function(fk,...)
+        REQ[#REQ+1]=fk.."|"..table.concat({...},"|")
+    end,routes=function() return {order} end, ships=function() return {} end,
+    GOOD={coal={use="war"}}, SELL_RATE={war=3}, owned=function(_,key) if key=="reg_a" then return A end end,
+    stock_view=function(_,r) return {region=r,held={coal=200},capacity={coal=400}} end,
+    available_stock=function(v) return v.region==B and 200 or 0 end, route_status=function() return {} end,
+    route_turns=function() return 3 end,free=function() return 300 end}
+    S.view,S.focus="spending","route:77"; S.refresh()
+    eq(S.view_key(),"trade_focus","order editor uses rule columns")
+    eq(S.data[2].route,"77","target row identifies saved order")
+    local n=#REQ
+    press(find_uicomponent(find("derpy_mr_row_2"),"derpy_mr_policy_plus"))
+    eq(REQ[#REQ],LOCAL.."|route_edit|77|target|110","target button reaches synchronized door")
+    press(sendb(6)); eq(REQ[#REQ],LOCAL.."|route_ctl|77|toggle","pause button requests correct action")
+    press(sendb(7)); eq(REQ[#REQ],LOCAL.."|route_ctl|77|cancel","cancel button requests correct action")
+    dump("route")
+    order.from="reg_c"
+    S.view,S.focus="settlements","routes:reg_a:coal"; S.refresh()
+    eq(S.data[1][3],"3 turns","offer displays actual saved-duration calculator")
+    press(sendb(1))
+    eq(REQ[#REQ],LOCAL.."|route_new|reg_b|reg_a|coal|100|100","Create button requests explicit recurring terms")
+    dump("route_offer")
+    while #REQ>n do table.remove(REQ) end
+    f.factions_trading_with=partners
+    f.region_list=regions
+    LOCAL=prior_local
+    DERPY_MR_FLOWS,S.view,S.focus=fl,view,focus
+    S.refresh()
+end
+do
+    local fl, selected, old7 = DERPY_MR_FLOWS, cm.get_campaign_ui_manager, CHARS[7]
+    local f = FACTIONS[LOCAL]
+    local pick, allowed, enabled = 7, true, true
+    local force = { command_queue_index=function() return 801 end,
+        general_character=function() return {command_queue_index=function() return 7 end} end }
+    CHARS[7] = {is_null_interface=function() return false end, faction=function() return f end,
+        has_military_force=function() return true end, military_force=function() return force end}
+    cm.get_campaign_ui_manager=function() return {get_char_selected_cqi=function() return pick end} end
+    DERPY_MR_FLOWS = {rates=function() return {army_provisions=enabled,actions=true} end,
+        provision_force=function() return allowed end,
+        provision_rows=function() return {{id="801",held=25,cap=50,need=5,short=0,auto=true,reason="Local stores above Keep"}} end}
+    local army = new("button_group_army",UI_ROOT);army.x,army.y,army.w,army.h=500,800,169,55
+    local template = new("button_recruitment",army);template.w,template.h=55,55
+    S.show(false); S.army_button_poll()
+    local widget=find("derpy_mr_army_open")
+    eq(widget.visible,true,"owned selected lord shows provisions")
+    eq(widget.images[0],"ui/skins/default/derpy_mr_provisions.png","provisions use a padded native army-bar icon")
+    eq(widget.text,"5","icon badge shows food needed per turn")
+    eq(widget.parent,army,"provisions belongs to native army bar")
+    eq(string.find(widget.tip,"Carried: 25 / 50")~=nil,true,"tooltip shows carried provisions")
+    local n=#REQ
+    click("derpy_mr_army_open")
+    eq(S.focus,"army:801","button opens selected force")
+    eq(S.view,"spending","button uses existing detail view")
+    eq(S.is_open(),true,"button opens the Vault")
+    eq(#REQ,n,"opening details never mutates the model")
+    S.show(false);pick=nil;S.army_button_poll();eq(widget.visible,false,"deselection hides indicator")
+    pick=7;allowed=false;S.army_button_poll();eq(widget.visible,false,"ineligible army hides indicator")
+    allowed=true;enabled=false;S.army_button_poll()
+    eq(widget.visible,true,"saved-off campaign explains disabled feature")
+    eq(find("derpy_mr_army_open").disabled,true,"saved-off campaign cannot open provisions")
+    local focus=S.focus;click("derpy_mr_army_open");eq(S.focus,focus,"disabled click changes nothing")
+    enabled=true;pick=8;CHARS[8]=CHARS[7];S.army_button_poll()
+    eq(widget.visible,false,"embedded hero cannot use the lord button")
+    CHARS[8]=nil;CHARS[7]=old7;cm.get_campaign_ui_manager=selected;DERPY_MR_FLOWS=fl
+    army:Destroy()
+end
 eq(#ERRORS, 0, "script errors: " .. table.concat(ERRORS, "; "))
 print("harness ok")
