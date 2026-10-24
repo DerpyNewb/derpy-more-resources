@@ -510,6 +510,14 @@ function R.links(faction)
             cargo[#cargo + 1] = s
         end
     end
+    -- An agreement's convoys are markers and nothing else: the agreement loop below draws the pair's road in its own
+    -- colour with its goods, so a convoy in flight changes neither. Shown with the shipments, to the same eyes. A
+    -- marker needs a place: a convoy with no position is listed by F.convoy_cargo and drawn by nobody.
+    for _, c in ipairs(R.shown('shipments') and F.convoy_cargo and F.convoy_cargo() or {}) do
+        if c.x and c.y and (c.f == faction:name() or c.buyer == faction:name() or (known[c.f] and visible[c.from] and visible[c.to])) then
+            cargo[#cargo + 1] = c
+        end
+    end
     for _, o in ipairs(R.shown('contracts') and F.routes(faction) or {}) do
         if o.enabled and F.route_status(faction, o, 'show') then add(faction:name(), o.from, o.to,nil,{{o.stem},{}}) end
     end
@@ -634,7 +642,13 @@ function R.refresh()
     local old_traffic, traffic, shared, routes = {}, {}, {}, {}
     for _, t in ipairs(R.traffic) do old_traffic[t.key] = t end
     for _, s in ipairs(cargo) do
-        if count < 512 then
+        -- a convoy's marker takes a decal only near the camera, as the road dashes do: there can be hundreds
+        local near = true
+        if s.convoy then
+            local dx, dy = cm:log_to_dis(s.x, s.y)
+            near = (dx-cx)*(dx-cx) + (dy-cy)*(dy-cy) <= radius * radius
+        end
+        if near and count < 512 then
             count = count + 1
             wanted['derpy_mr_road_' .. count] = { x = s.x, y = s.y, scene = 'derpy_mr_route_cargo_' .. size }
         end

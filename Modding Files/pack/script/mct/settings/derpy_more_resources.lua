@@ -48,7 +48,7 @@ if IN_CAMPAIGN then o_raze:set_locked(true, LOCK_REASON) end
 
 local o_trade = m:add_new_option("trade", "slider")
 o_trade:set_text("Trade share per turn")
-o_trade:set_tooltip_text("Each turn, trade partners receive this share of removable surplus toward their capital import targets. Keep reserves and cargo already on the road are respected. 0 turns this off.")
+o_trade:set_tooltip_text("Each turn, trade partners receive this share of removable surplus toward their capital import targets. Keep reserves and cargo already on the road are respected. The goods travel the road between the two capitals, a turn for every 40 hexes, and an army at war with the sender can seize them on the way. 0 turns this off.")
 o_trade:slider_set_precision(0)
 o_trade:slider_set_min_max(0, 25)
 o_trade:slider_set_step_size(1, 0)
@@ -78,7 +78,7 @@ if IN_CAMPAIGN then o_reach:set_locked(true, LOCK_REASON) end
 
 local o_ships = m:add_new_option("ships", "slider")
 o_ships:set_text("Shipments on the road")
-o_ships:set_tooltip_text("How many shipments of yours can be on the road at once. Sending a resource between your settlements takes two turns, and an army at war with you can seize it on the way. Other factions keep one.")
+o_ships:set_tooltip_text("How many shipments of yours can be on the road at once. Sending a resource between your settlements takes one to six turns, by the length of its road, and an army at war with you can seize it on the way. Other factions keep one.")
 o_ships:slider_set_precision(0)
 o_ships:slider_set_min_max(1, 10)
 o_ships:slider_set_step_size(1, 0)

@@ -52,7 +52,9 @@ RATES = (
      "0 turns this off.", 0, 100, 50),
     ("trade", "Trade share per turn",
      "Each turn, trade partners receive this share of removable surplus toward their capital import targets. "
-     "Keep reserves and cargo already on the road are respected. 0 turns this off.", 0, 25, 5),
+     "Keep reserves and cargo already on the road are respected. The goods travel the road between the two "
+     "capitals, a turn for every 40 hexes, and an army at war with the sender can seize them on the way. "
+     "0 turns this off.", 0, 25, 5),
     # IMPORT DUTY (spec 2026-10-08): gold, paid to the partner, never more than the payer holds
     ("duty", "Import duty",
      "Each turn, every faction pays each trade partner this share of the value of what that partner's "
@@ -67,7 +69,8 @@ RATES = (
     # PHASE 5: shipments are drawn on the map, so their number is held down
     ("ships", "Shipments on the road",
      "How many shipments of yours can be on the road at once. Sending a resource between your settlements "
-     "takes two turns, and an army at war with you can seize it on the way. Other factions keep one.", 1, 10, 3),
+     "takes one to six turns, by the length of its road, and an army at war with you can seize it on the way. "
+     "Other factions keep one.", 1, 10, 3),
     # THE RECRUITMENT DRAW (workshop expansion spec 2026-10-08, section 3)
     ("recruit_per", "Resources per 100 gold of a recruit",
      "How many resources a recruit takes from your stores for each 100 gold it is worth. 0 turns this off.",
@@ -298,7 +301,7 @@ L = {
     "VIEWS": {
         "goods": ((36, 204, "left"), (244, 90, "right"), (338, 100, "right"), (442, 110, "right"),
                   (556, 240, "right")),
-        "focus": ((36, 230, "left"), (276, 120, "right"), (406, 90, "right"), (506, 80, "left"),
+        "focus": ((36, 230, "left"), (276, 120, "right"), (406, 90, "right"), (506, 80, "right"),
                   (596, 204, "left")),
         "settlements": ((36, 230, "left"), (276, 46, "right"), (330, 90, "left"), (430, 80, "right"),
                         (520, 280, "right")),
@@ -1257,6 +1260,28 @@ def check_economy_mutations():
         ("campaign switch", 'and F.rates()[kind] and F.economy_open(faction, region, d)',
          'and F.economy_open(faction, region, d)'),
         ("capture cleanup", '    F.economy_clear(region)\n    local ups', '    local ups'),
+        ("price swing", "math.floor(F.PRICE_SWING * imbalance / F.PCT) + F.PCT", "F.PCT"),
+        ("price spread", "math.floor(c * (F.SPREAD + F.PCT) / F.PCT)", "c"),
+        ("cover clamp", "imbalance = clamp_pct(math.floor((F.SHIP.ai_on - cover) * F.PCT / F.SHIP.ai_on))",
+         "imbalance = math.floor((F.SHIP.ai_on - cover) * F.PCT / F.SHIP.ai_on)"),
+        ("fullness clamp", "imbalance = clamp_pct(F.PCT - math.floor(held * 200 / cap))",
+         "imbalance = F.PCT - math.floor(held * 200 / cap)"),
+        ("category cover", "local cover = math.floor((v.totals[g.use] or 0) / use)",
+         "local cover = math.floor((v.held[stem] or 0) / use)"),
+        ("sell at store price", "F.sell_price(F.local_price(v, stem, fkey))",
+         "math.floor(F.price(F.GOOD[stem], fkey) * F.PCT)"),
+        ("unpriced store", "if k > 0 and F.price_mult(v, stem) then", "if k > 0 then"),
+        ("zero-pay lot", "if pay > 0 then", "if true then"),
+        ("price gradient", "pd >= F.buy_price(ps)", "true"),
+        ("price gradient boundary", "pd >= F.buy_price(ps)", "pd > F.buy_price(ps)"),
+        ("price gradient keys",
+         "local ps, pd = F.local_price(source, g.stem, exporter:name()), F.local_price(dest, g.stem, partner:name())",
+         "local ps, pd = F.local_price(source, g.stem, partner:name()), F.local_price(dest, g.stem, exporter:name())"),
+        ("trade from the cheapest store", "F.cheapest_store(sources, g.stem)", "F.fullest(sources, g.stem)"),
+        ("cheapest store tie", "(mult == low and n > amount)", "(mult == low and n < amount)"),
+        ("quote buy is the buy price", "buy = F.buy_price(price)", "buy = price"),
+        ("quote sell is the sell price", "sell = F.sell_price(price)", "sell = price"),
+        ("quote price from the base", "local price = F.gold(base, mult)", "local price = base"),
     )
     for label, before, after in mutations:
         assert subject.count(before) == 1, "stale mutation anchor: " + label
@@ -1327,12 +1352,44 @@ def check_route_mutations():
         ("recurring once per turn", 'if o.enabled and o.done ~= turn then', 'if o.enabled then'),
         ("escrow debit", 'F.route_gold(faction, -escrow)', 'F.route_gold(faction, 0)'),
         ("checked stock debit", 'not F.route_goods(from, stem, -n)', 'false'),
-        ("paid delivered only", 'math.min(s.escrow, delivered * s.price)', 's.escrow'),
+        ("paid delivered only", 'math.min(s.escrow, F.gold(delivered, s.price_c))', 's.escrow'),
+        ("origin price at dispatch", "local c = F.cart_price(seller, from, faction, to, stem)",
+         "local c = DERPY_MR_FLOWS_SELL_RATE[F.GOOD[stem].use] * F.PCT"),
+        ("cart floor at destination", "return math.max(F.buy_price(ps), pd and F.sell_price(pd) or 0)",
+         "return F.buy_price(ps)"),
+        ("cart floor keys", "local pd = F.local_price(F.stock_view(buyer, to), stem, buyer:name())",
+         "local pd = F.local_price(F.stock_view(buyer, to), stem, seller:name())"),
+        ("zero-gold cart", "if partner and escrow <= 0 then return nil end", ""),
+        ("whole gold settlement", "math.min(s.escrow, F.gold(delivered, s.price_c))",
+         "math.min(s.escrow, delivered * s.price_c / F.PCT)"),
+        ("unpriced origin", "if partner and not F.price_mult(source, stem) then return nil end", ""),
+        ("pool check at the source", 'if o.seller ~= faction:name() and not F.pool(from, o.stem) then return nil, "No price at the source" end', ""),
+        ("pool check is partner only", 'if o.seller ~= faction:name() and not F.pool(from, o.stem) then',
+         'if not F.pool(from, o.stem) then'),
+        ("own order stays free", "local partner = order and seller:name() ~= fkey", "local partner = order ~= nil"),
+        ("unaffordable cart", "if escrow > faction:treasury() then return nil end", ""),
+        ("saved cart migration", "F.sanitize_routes()\n    F.sanitize_ships()", "F.sanitize_routes()"),
+        ("saved cart price in hundredths", "F.stock_number(s.price) and s.price * F.PCT or 0", "F.stock_number(s.price) and s.price or 0"),
         ("unpaid refund", 'local refund = s.escrow - pay', 'local refund = 0'),
         ("escrow settlement once", 'if not s.sender or s.settled then return end', 'if not s.sender then return end'),
         ("contract cancellation", 'for _, s in ipairs(carts) do F.route_return(s) end', 'do end'),
         ("dead party money loss", 'and v[3] or "lost"', 'and v[3] or "refunded"'),
         ("standing route replacement", 'and not F.route_covers(faction, cap:name(), use)', ''),
+        # agreement cargo, task 5: a shipment with a saved road takes the road's length in hexes (F.route_turns, F.ship)
+        ("road length duration", "math.ceil(F.road_steps(road) / F.ROAD_PER_TURN)", "1"),
+        ("road counts points", "math.ceil(F.road_steps(road) / F.ROAD_PER_TURN)", "math.ceil(#road / F.ROAD_PER_TURN)"),
+        ("road counts points less one", "math.ceil(F.road_steps(road) / F.ROAD_PER_TURN)", "math.ceil((#road - 1) / F.ROAD_PER_TURN)"),
+        ("road ceiling of six", "math.min(6, math.ceil(F.road_steps(road) / F.ROAD_PER_TURN))", "math.ceil(F.road_steps(road) / F.ROAD_PER_TURN)"),
+        ("empty road is no road", "if road and #road > 0 then\n        return math.max(1, math.min(6,",
+         "if road then\n        return math.max(1, math.min(6,"),
+        ("shipment saves its road's time", "s.duration = F.route_turns(from, to, road)", "s.duration = F.route_turns(from, to)"),
+        # no road: the panel's figure is a lower bound, the longer span, not the Euclidean distance
+        ("no road: euclidean distance", "math.ceil(math.max(math.abs(dx), math.abs(dy)) / F.ROAD_PER_TURN)",
+         "math.ceil(math.sqrt(dx * dx + dy * dy) / F.ROAD_PER_TURN)"),
+        ("no road: the y span counts", "math.ceil(math.max(math.abs(dx), math.abs(dy)) / F.ROAD_PER_TURN)",
+         "math.ceil(math.abs(dx) / F.ROAD_PER_TURN)"),
+        ("no road floor of one", "return math.max(1, math.min(6, math.ceil(math.max(math.abs(dx), math.abs(dy)) / F.ROAD_PER_TURN)))",
+         "return math.min(6, math.ceil(math.max(math.abs(dx), math.abs(dy)) / F.ROAD_PER_TURN))"),
     )
     for label, before, after in mutations:
         assert subject.count(before) == 1, "stale route mutation: " + label
@@ -1346,6 +1403,142 @@ def check_route_mutations():
     code, out = run_harness(FLOWS_HARNESS)
     assert code == 0, out
     print("route mutations: %d/%d caught; restored harness passes" % (len(mutations), len(mutations)))
+
+
+def check_convoy_mutations():
+    """Agreement cargo (spec 2026-10-23, 5.1): each rule of the convoy that leaves, broken once."""
+    subject = flows_lua().replace("\r\n", "\n")
+    mutations = (
+        ("duration clamp", "math.max(1, math.min(F.rates().reach, math.ceil(F.road_steps(path) / F.ROAD_PER_TURN)))", "1"),
+        # a road is its hexes: a bridge is one point and as many hexes as the reach search charged it (F.road_steps)
+        ("convoy road counts points", "math.max(1, math.abs(path[i][1] - path[i - 1][1]), math.abs(path[i][2] - path[i - 1][2]))", "1"),
+        ("convoy turns count points less one", "math.ceil(F.road_steps(path) / F.ROAD_PER_TURN)", "math.ceil((#path - 1) / F.ROAD_PER_TURN)"),
+        ("road hexes ignore the y span", ", math.abs(path[i][2] - path[i - 1][2]))", ")"),
+        ("road hex is at least one", "steps = steps + math.max(1, math.abs(", "steps = steps + math.max(0, math.abs("),
+        ("dispatch debit", "F.route_goods(source.region, g.stem, -n, KIND.trade)", "true"),
+        ("road from the exporter", "if path[1][1] ~= hx or path[1][2] ~= hy then path = F.reverse(path) end", "do end"),
+        ("trade guarded", "F.guard(F.trade, faction)", "F.trade(faction)"),
+        ("refused debit", "elseif F.route_goods(source.region, g.stem, -n, KIND.trade) then",
+         "elseif F.route_goods(source.region, g.stem, -n, KIND.trade) or true then"),
+        ("one convoy per partner", "convoy = convoy or F.convoy_new(", "convoy = F.convoy_new("),
+        ("departure ledger line", 'F.log(exporter:name(), g.stem, KIND.trade .. "_out", n)', "do end"),
+        ("reverse is a copy", "    local out = {}\n    for i = #list, 1, -1 do out[#out + 1] = list[i] end\n    return out",
+         "    local n = #list\n    for i = 1, math.floor(n / 2) do list[i], list[n + 1 - i] = list[n + 1 - i], list[i] end\n    return list"),
+        ("convoy sequence", "F.state.convoy_seq = (F.state.convoy_seq or 0) + 1", "F.state.convoy_seq = 1"),
+        # Task 2: cargo on the road counts as incoming (F.ships_to)
+        ("convoy incoming", "if c.buyer == fkey and c.to == rkey then", "if false then"),
+        ("convoy read creates no list", "return F.state.convoys or {}",
+         "F.state.convoys = F.state.convoys or {}; return F.state.convoys"),
+        ("empty basket entry", "if n and n > 0 and (stem == nil or g.stem == stem) then",
+         "if n and (stem == nil or g.stem == stem) then"),
+        ("convoy buyer", "if c.buyer == fkey and c.to == rkey then", "if c.to == rkey then"),
+        ("convoy store", "if c.buyer == fkey and c.to == rkey then", "if c.buyer == fkey then"),
+        ("convoy stem filter", "if n and n > 0 and (stem == nil or g.stem == stem) then", "if n and n > 0 then"),
+        ("convoy goods order", "            for _, g in ipairs(DERPY_MR_FLOWS_GOODS) do\n                local n = c.basket[g.stem]",
+         "            for key, n in pairs(c.basket) do\n                local g = { stem = key }"),
+        ("convoy arrival turn", "due = due, convoy = c.id }", "due = c.at + F.SHIP.turns, convoy = c.id }"),
+        # the turn a human buyer is told (F.convoy_due): a convoy lands at its exporter's turn start, a turn after the
+        # human's own start in that round, so a computer exporter's convoy is usable a turn later than it lands
+        ("convoy due loses its turn", "return c.due + 1 end", "return c.due end"),
+        ("convoy due condition inverted", "if buyer and buyer:is_human() and not (ex and ex:is_human()) then",
+         "if not (buyer and buyer:is_human() and not (ex and ex:is_human())) then"),
+        ("convoy incoming reports the landing", "due = due or F.convoy_due(c)\n", "due = due or c.due\n"),
+        ("convoy cargo reports the landing", "due = F.convoy_due(c),\n", "due = c.due,\n"),
+        # the contract cart half of the same count: a free trade that ignored it would send the whole need again
+        ("shipments incoming",
+         "if (s.recipient or s.f) == fkey and s.to == rkey and (stem == nil or s.stem == stem) then out[#out + 1] = s end",
+         "do end"),
+        # Task 3: stepping, arrival, seizure, return, sweep (F.convoys_turn and what it calls)
+        ("arrival at the current capital", "local to = F.capital(buyer)", "local to = cm:get_region(c.to)"),
+        ("convoy seizure removes", "if not F.convoy_drop(c) then return end\n    for stem, n in pairs(c.basket) do F.move(nil, F.nearest(captor",
+         "for stem, n in pairs(c.basket) do F.move(nil, F.nearest(captor"),
+        ("war returns convoy", "then F.convoy_return(c)", "then F.convoy_drop(c)"),
+        ("enemy cache per turn", "if hit and hit.turn == turn then return hit.list end", "if false then return hit.list end"),
+        ("convoys at turn start", "F.guard(F.convoys_turn, faction)\n    F.guard(F.ships_turn, faction)", "F.guard(F.ships_turn, faction)"),
+        ("convoys of this exporter", "if c.f == fkey then mine[#mine + 1] = c end", "mine[#mine + 1] = c"),
+        ("convoy arrival day", "elseif turn >= c.due then F.convoy_arrive(c)", "elseif turn > c.due then F.convoy_arrive(c)"),
+        ("convoys in id order", "for _, c in ipairs(mine) do\n        local buyer", "for _, c in ipairs(F.reverse(mine)) do\n        local buyer"),
+        ("convoy step index", "math.floor((#road - 1) * elapsed / duration) + 1", "math.floor((#road - 1) * elapsed / duration) + 2"),
+        ("convoy seizure asked", "local captor = c.x and c.y and F.captor(faction, c)", "local captor = nil"),
+        ("convoy with no position", "local captor = c.x and c.y and F.captor(faction, c)", "local captor = F.captor(faction, c)"),
+        ("convoy treaty gone", "or not F.partners(faction, buyer) then F.convoy_return(c)", "then F.convoy_return(c)"),
+        ("convoy landless buyer", "or not F.capital(buyer) or", "or"),
+        ("convoy dead buyer", "if not buyer or not F.capital(buyer)", "if not F.capital(buyer)"),
+        ("return to the nearest", "to = F.nearest(exporter, c.x, c.y) elseif", "to = F.capital(exporter) elseif"),
+        ("return without a position", "elseif exporter then to = F.capital(exporter) end", "end"),
+        ("arrival books traded", "F.move(nil, to, stem, n, KIND.trade, nil, c.buyer)", "F.move(nil, to, stem, n, KIND.move, nil, c.buyer)"),
+        ("seizure books raided", "F.nearest(captor, c.x, c.y), stem, n, KIND.raid, nil, captor:name())",
+         "F.nearest(captor, c.x, c.y), stem, n, KIND.move, nil, captor:name())"),
+        ("return books moved", "F.move(nil, to, stem, n, KIND.move, nil, c.f)", "F.move(nil, to, stem, n, KIND.move, nil, nil)"),
+        ("arrival drops first",
+         "    if not F.convoy_drop(c) then return end\n    local buyer = F.live(c.buyer)\n    local to = F.capital(buyer)\n    for stem, n in pairs(c.basket) do F.move(nil, to, stem, n, KIND.trade, nil, c.buyer) end",
+         "    local buyer = F.live(c.buyer)\n    local to = F.capital(buyer)\n    for stem, n in pairs(c.basket) do F.move(nil, to, stem, n, KIND.trade, nil, c.buyer) end\n    F.convoy_drop(c)"),
+        ("seizure drops first",
+         "    if not F.convoy_drop(c) then return end\n    for stem, n in pairs(c.basket) do F.move(nil, F.nearest(captor, c.x, c.y), stem, n, KIND.raid, nil, captor:name()) end",
+         "    for stem, n in pairs(c.basket) do F.move(nil, F.nearest(captor, c.x, c.y), stem, n, KIND.raid, nil, captor:name()) end\n    F.convoy_drop(c)"),
+        ("return drops first",
+         "    if not F.convoy_drop(c) then return end\n    local exporter, to = F.live(c.f), nil\n    if exporter and c.x then to = F.nearest(exporter, c.x, c.y) elseif exporter then to = F.capital(exporter) end\n    for stem, n in pairs(c.basket) do F.move(nil, to, stem, n, KIND.move, nil, c.f) end",
+         "    local exporter, to = F.live(c.f), nil\n    if exporter and c.x then to = F.nearest(exporter, c.x, c.y) elseif exporter then to = F.capital(exporter) end\n    for stem, n in pairs(c.basket) do F.move(nil, to, stem, n, KIND.move, nil, c.f) end\n    F.convoy_drop(c)"),
+        ("arrival once", "    if not F.convoy_drop(c) then return end\n    local buyer = F.live(c.buyer)",
+         "    F.convoy_drop(c)\n    local buyer = F.live(c.buyer)"),
+        ("convoy follows the capital", "else c.to = F.capital(buyer):name(); F.convoy_step(c, turn) end", "else F.convoy_step(c, turn) end"),
+        ("return needs a settlement", "if exporter and c.x then to = F.nearest(exporter, c.x, c.y) elseif exporter then",
+         "if exporter and c.x then to = F.nearest(exporter, c.x, c.y) or cm:get_region(c.from) elseif exporter then"),
+        ("destroyed force skipped", "and not e.mf:is_null_interface() then", "then"),
+        ("garrison is no army", "if not mf:is_armed_citizenry() and mf:has_general() then", "if mf:has_general() then"),
+        ("sweep dead exporters", "if not F.live(convoys[i].f) then table.remove(convoys, i) end", "if false then table.remove(convoys, i) end"),
+        ("sweep keeps living ones", "if not F.live(convoys[i].f) then table.remove(convoys, i) end", "if true then table.remove(convoys, i) end"),
+        # Task 4: the load keeps only what the convoy code can read (F.convoy_sound, F.sanitize_convoys)
+        ("convoy due not before at", "and c.due >= c.at)", "and true)"),
+        ("convoy id end anchored", 'F.CONVOY_PREFIX .. "(%d+)$")', 'F.CONVOY_PREFIX .. "(%d+)")'),
+        ("convoy id start anchored", 'string.match(c.id, "^" .. F.CONVOY_PREFIX', "string.match(c.id, F.CONVOY_PREFIX"),
+        ("convoy id whole", "if not (n and F.stock_number(n)) then", "if not n then"),
+        ("convoy exporter string", 'type(c.f) == "string" and', "true and"),
+        ("convoy buyer string", 'type(c.buyer) == "string" and', "true and"),
+        ("convoy from string", 'type(c.from) == "string" and', "true and"),
+        ("convoy to string", 'and type(c.to) == "string")', "and true)"),
+        ("convoy basket a table", 'type(c.basket) ~= "table" or next(c.basket) == nil', "next(c.basket) == nil"),
+        ("convoy basket not empty", " or next(c.basket) == nil then", " then"),
+        ("convoy basket goods only", "if not (F.GOOD[stem] and F.stock_number(k) and k > 0) then",
+         "if not (F.stock_number(k) and k > 0) then"),
+        ("convoy amount whole", "F.stock_number(k) and k > 0", 'type(k) == "number" and k > 0'),
+        ("convoy amount positive", "F.stock_number(k) and k > 0", "F.stock_number(k)"),
+        ("convoy at whole", "F.stock_number(c.at) and F.stock_number(c.due)", 'type(c.at) == "number" and F.stock_number(c.due)'),
+        ("convoy due whole", "F.stock_number(c.at) and F.stock_number(c.due)", 'F.stock_number(c.at) and type(c.due) == "number"'),
+        ("convoy position pair", "if (c.x ~= nil or c.y ~= nil) and not (", "if (c.x ~= nil and c.y ~= nil) and not ("),
+        ("convoy position whole", "not (F.stock_number(c.x) and F.stock_number(c.y))", "not F.stock_number(c.x)"),
+        ("convoy position optional", "if (c.x ~= nil or c.y ~= nil) and not (", "if not ("),
+        ("convoy road parses", "if c.road ~= nil and not F.unpack_road(c.road) then", 'if c.road ~= nil and type(c.road) ~= "string" then'),
+        ("convoy road optional", "if c.road ~= nil and not F.unpack_road(c.road) then", "if not F.unpack_road(c.road) then"),
+        ("convoy record a table", 'if type(c) ~= "table" or type(c.id) ~= "string" then', 'if type(c.id) ~= "string" then'),
+        ("convoy kept ids move the sequence", "clean[#clean + 1] = c; max_id = math.max(max_id, n)", "clean[#clean + 1] = c"),
+        ("convoy saved sequence kept", "F.stock_number(F.state.convoy_seq) and F.state.convoy_seq or 0)", "0)"),
+        ("old save makes no convoy list", 'F.state.convoys = type(list) == "table" and clean or nil', "F.state.convoys = clean"),
+        ("convoys sanitized at load", "F.sanitize_ships()\n    F.sanitize_convoys()", "F.sanitize_ships()"),
+        # Task 6: what the Vault and the maps read (F.convoy_cargo)
+        ("cargo of a dead exporter", "if F.live(c.f) then\n            local stem, n", "if true then\n            local stem, n"),
+        ("cargo skips a convoy with no position", "if F.live(c.f) then\n            local stem, n",
+         "if c.x and c.y and F.live(c.f) then\n            local stem, n"),
+        ("cargo largest good", "if not n or v > n or (v == n and k < stem) then", "if not n or v < n or (v == n and k < stem) then"),
+        ("cargo ties to the lower stem", "or (v == n and k < stem) then stem, n = k, v end", "then stem, n = k, v end"),
+        ("cargo ties to the upper stem", "(v == n and k < stem)", "(v == n and k > stem)"),
+        ("cargo names the buyer", "id = c.id, f = c.f, buyer = c.buyer, from = c.from,", "id = c.id, f = c.f, from = c.from,"),
+        ("cargo is marked a convoy", "stem = stem, n = n, basket = c.basket, convoy = true }", "stem = stem, n = n, basket = c.basket }"),
+        ("cargo read creates no list", "for _, c in ipairs(F.convoys()) do\n        if F.live(c.f) then",
+         "F.state.convoys = F.state.convoys or {}\n    for _, c in ipairs(F.convoys()) do\n        if F.live(c.f) then"),
+    )
+    for label, before, after in mutations:
+        assert subject.count(before) == 1, "stale convoy mutation: " + label
+        changed = subject.replace(before, after, 1)
+        syntax = subprocess.run([LUA_EXE.replace("lua.exe", "luac.exe"), "-p", "-"],
+            input=changed, capture_output=True, text=True)
+        assert syntax.returncode == 0, (label, syntax.stderr)
+        code, out = run_harness(FLOWS_HARNESS, changed)
+        assert code != 0 and "in function" in out and "syntax" not in out, "survived: %s\n%s" % (label, out)
+        print("  caught:", label)
+    code, out = run_harness(FLOWS_HARNESS)
+    assert code == 0, out
+    print("convoy mutations: %d/%d caught; restored harness passes" % (len(mutations), len(mutations)))
 
 
 def check_map_road_mutations():
@@ -1364,6 +1557,120 @@ def check_map_road_mutations():
         assert code != 0 and "harness ok" not in out, "survived: %s\n%s" % (label, out)
         print("  caught:", label)
     print("map road mutations: %d/%d caught" % (len(mutations), len(mutations)))
+
+
+TERRAIN_SRC = os.path.join(ROOT, "Modding Files", "source", "resource_overhaul", "terrain_routes.lua")
+TERRAIN_HARNESS = os.path.join(ROOT, "tools", "_resource_terrain_routes_harness.lua")
+
+
+def run_terrain_harness(changed=None):
+    """The 3D map's harness, from the workspace root: (returncode, output), against `changed` text
+    in place of terrain_routes.lua when one is given."""
+    tmp = tempfile.mkdtemp()
+    try:
+        with io.open(TERRAIN_HARNESS, encoding="utf-8", newline="") as fh:
+            h = fh.read()
+        if changed is not None:
+            src = os.path.join(tmp, "terrain_routes.lua")
+            with io.open(src, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(changed)
+            old = "dofile('Modding Files/source/resource_overhaul/terrain_routes.lua')"
+            assert h.count(old) == 1, "the terrain harness loads its script some other way"
+            h = h.replace(old, "dofile('" + src.replace("\\", "/") + "')")
+        hp = os.path.join(tmp, "harness.lua")
+        with io.open(hp, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(h)
+        got = subprocess.run([LUA_EXE, hp], cwd=ROOT, capture_output=True, text=True)
+    finally:
+        shutil.rmtree(tmp)
+    return got.returncode, got.stdout + got.stderr
+
+
+def _why(out):
+    """The assertion a harness stopped on: the message after `file:line:` in its first line."""
+    line = out.strip().splitlines()[0] if out.strip() else ""
+    found = re.search(r"\.lua:\d+: (.*)$", line)
+    return (found.group(1) if found else line)[:110]
+
+
+def check_cargo_view_mutations():
+    """Agreement cargo, Task 6: who sees a convoy and how it is drawn. The Vault (stores_panel.lua) and the 3D
+    map (terrain_routes.lua), each rule broken once; the harness of the file must fail."""
+    luac = LUA_EXE.replace("lua.exe", "luac.exe")
+    stores = stores_lua().replace("\r\n", "\n")
+    panel = (
+        ("trade row counts only convoys going out", "if c.f == fk or c.buyer == fk then out[#out + 1] = c end",
+         "if c.f == fk then out[#out + 1] = c end"),
+        ("trade row counts only convoys coming in", "if c.f == fk or c.buyer == fk then out[#out + 1] = c end",
+         "if c.buyer == fk then out[#out + 1] = c end"),
+        ("trade row counts a stranger's convoys", "if c.f == fk or c.buyer == fk then out[#out + 1] = c end",
+         "out[#out + 1] = c"),
+        ("trade row skips a convoy with no position", "if c.f == fk or c.buyer == fk then out[#out + 1] = c end",
+         "if c.x and (c.f == fk or c.buyer == fk) then out[#out + 1] = c end"),
+        ("trade row out and in swapped", "if c.f == fk then out = out + 1 end", "if c.buyer == fk then out = out + 1 end"),
+        ("trade row with nothing on the road", "if #convoys > 0 then", "if true then"),
+        ("basket largest first", "return basket[a] > basket[b] end", "return basket[a] < basket[b] end"),
+        ("basket equal amounts by name", "        return a < b\n    end)\n    local parts = {}", "        return a > b\n    end)\n    local parts = {}"),
+        ("tooltip names the arrival turn", '", arrives turn " .. tostring(c.due)', '", arrives turn " .. tostring(c.at)'),
+        ("tooltip names every convoy", "for i = 1, math.min(#soon, S.CONVOY_LINES) do", "for i = 1, #soon do"),
+        ("tooltip names the latest first", "if a.due ~= b.due then return a.due < b.due end",
+         "if a.due ~= b.due then return a.due > b.due end"),
+        ("map draws a stranger's convoys", "and S.convoys_of(faction:name()) or {}) do\n",
+         'and S.ask("convoy_cargo") or {}) do\n'),
+        ("map convoys ignore the shipments switch",
+         "ipairs((not routes or routes.shown('shipments')) and S.convoys_of(faction:name()) or {}) do\n",
+         "ipairs(S.convoys_of(faction:name())) do\n"),
+        ("map draws a convoy with no position", "if s.x and s.y then\n            local c = cart(s)", "do\n            local c = cart(s)"),
+        ("map tooltip lists the basket", "local what = s.convoy and S.basket_text(s.basket) or (", "local what = ("),
+        # a far convoy stays on the surface and out of the frame, as a foreign road does
+        ("map frames a convoy's cart", "framed = not s.convoy }", "framed = true }"),
+        # convoys on one spot: one cart, whose tooltip lists them
+        ("map draws every convoy on a spot", "if stacked[spot] then", "if false then"),
+        ("map stacked cart names one convoy", "c.stack and #c.stack > 1 and S.convoy_tip(c.stack) or S.ship_tip(c.s)",
+         "S.ship_tip(c.s)"),
+        ("tooltip types the hexes", "((sh and sh.near) or 3)", "3"),
+        ("tooltip equal turns by id text", "if seq(a) ~= seq(b) then return seq(a) < seq(b) end\n        return a.id < b.id",
+         "return a.id < b.id"),
+    )
+    for label, before, after in panel:
+        assert stores.count(before) == 1, "stale cargo view mutation: " + label
+        code, out = run_harness(HARNESS, stores_text=stores.replace(before, after, 1))
+        assert code != 0 and "harness ok" not in out, "survived: %s\n%s" % (label, out)
+        print("  caught:", label, "-", _why(out))
+    with io.open(TERRAIN_SRC, encoding="utf-8", newline="") as fh:
+        terrain = fh.read().replace("\r\n", "\n")
+    cond = "c.f == faction:name() or c.buyer == faction:name() or (known[c.f] and visible[c.from] and visible[c.to])"
+    markers = (
+        ("convoy guard", "F.convoy_cargo and F.convoy_cargo() or {}", "F.convoy_cargo() or {}"),
+        ("convoys follow the shipments switch", "R.shown('shipments') and F.convoy_cargo and F.convoy_cargo() or {}",
+         "F.convoy_cargo and F.convoy_cargo() or {}"),
+        ("convoy of the viewer's own", cond, cond.replace("c.f == faction:name() or ", "")),
+        ("convoy bound for the viewer", cond, cond.replace("c.buyer == faction:name() or ", "")),
+        ("convoy of a stranger", cond, "true"),
+        ("convoy of an unmet faction", cond, cond.replace("known[c.f] and ", "")),
+        ("convoy start in the fog", cond, cond.replace("visible[c.from] and ", "")),
+        ("convoy end in the fog", cond, cond.replace(" and visible[c.to]", "")),
+        ("convoy with no x", "if c.x and c.y and (", "if c.y and ("),
+        ("convoy with no y", "if c.x and c.y and (", "if c.x and ("),
+        ("convoy draws its own line", "            cargo[#cargo + 1] = c\n",
+         "            add(c.f, c.from, c.to, nil, {{c.stem},{}})\n            cargo[#cargo + 1] = c\n"),
+        ("convoy marker", "            cargo[#cargo + 1] = c\n", "            do end\n"),
+        # the decal budget: a convoy's marker only near the camera, a shipment's as before
+        ("convoy marker without the camera test", "if near and count < 512 then", "if count < 512 then"),
+        ("shipment marker with the camera test", "        if s.convoy then\n            local dx, dy = cm:log_to_dis(s.x, s.y)",
+         "        if true then\n            local dx, dy = cm:log_to_dis(s.x, s.y)"),
+    )
+    for label, before, after in markers:
+        assert terrain.count(before) == 1, "stale cargo view mutation: " + label
+        changed = terrain.replace(before, after, 1)
+        syntax = subprocess.run([luac, "-p", "-"], input=changed, capture_output=True, text=True)
+        assert syntax.returncode == 0, (label, syntax.stderr)
+        code, out = run_terrain_harness(changed)
+        assert code != 0 and "harness ok" not in out, "survived: %s\n%s" % (label, out)
+        print("  caught:", label, "-", _why(out))
+    code, out = run_terrain_harness()
+    assert code == 0, out
+    print("cargo view mutations: %d/%d caught; restored harnesses pass" % (len(panel) + len(markers), len(panel) + len(markers)))
 
 
 def check_layout():
@@ -1551,6 +1858,9 @@ def check_text_fits():
     assert CHAR_W * len(longest + " 100%") <= V["settlements"][4][1], "%r overflows Fullest store" % longest
     assert CHAR_W * len("123456 / 200000") <= V["goods"][3][1], "a realm-wide Space sum overflows"
     assert CHAR_W * len("123456 / 200000") <= V["focus"][1][1], "a drill-down's Held / Space overflows"
+    top = G.STORE_BASE + G.STORE_STEP * G.STORE_TOP     # the most space a settlement's store can have
+    assert CHAR_W * len("%d / %d Full" % (top, top)) <= V["focus"][1][1], "a full store's Held / Space and mark overflow"
+    assert CHAR_W * len("999.99") <= V["focus"][3][1], "a drill-down's Price overflows"
 
 
 def check_xml():
@@ -1623,7 +1933,9 @@ def selftest():
     check_economy_mutations()
     check_provision_mutations()
     check_route_mutations()
+    check_convoy_mutations()
     check_map_road_mutations()
+    check_cargo_view_mutations()
     # the Lua builds derpy_mr_store_<stem>_<kind> from FLOW_KIND; those must be Task 2's junctions
     assert set(FLOW_KIND.values()) == {k for k, _p, _n in G.FLOW_FACTORS}, FLOW_KIND
     assert G.flow_junction("coal", "raided") == "derpy_mr_store_coal_raided"

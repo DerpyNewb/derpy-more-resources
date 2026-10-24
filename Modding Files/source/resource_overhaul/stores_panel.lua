@@ -30,6 +30,12 @@ function S.num(n)
     return string.format("%.1f", n)
 end
 
+-- Hundredths of a gold as "0.75"; whole numbers only, so no float format can round it.
+function S.money(c)
+    local pct = 100
+    return math.floor(c / pct) .. "." .. string.format("%02d", c % pct)
+end
+
 local function loc(key, fallback)
     local s = common.get_localised_string(key)
     if s == nil or s == "" then return fallback end
@@ -192,9 +198,32 @@ local function per_turn(n)
     return S.num(n)
 end
 
-local function full_mark(full)
-    if full then return "[[col:red]]Full[[/col]]" end
-    return ""
+-- The Held / Space cell, with the red Full mark after it when the store is at the brim.
+local function held_space(d)
+    local text = S.num(d.held) .. " / " .. S.num(d.cap)
+    if d.full then return text .. " [[col:red]]Full[[/col]]" end
+    return text
+end
+
+-- A tooltip with one more line, the first line when it has none yet.
+local function add_line(tip, line)
+    if not line then return tip end
+    if tip == "" then return line end
+    return tip .. "\n" .. line
+end
+
+-- The Price cell and its tooltip sentence for one store; "-" and no sentence when nothing quotes it.
+-- A quote the sentence cannot be built from still gives its price, with no sentence.
+function S.price_of(f, region, stem)
+    local q = f and region and S.ask("quote", f, region, stem)
+    if not q then return "-", nil end
+    local ok, sentence = pcall(S.price_tip, q, S.use_of(stem))
+    return S.money(q.price), ok and sentence or nil
+end
+
+-- The use a good is counted under ("war"): its price counts the stock of that whole category.
+function S.use_of(stem)
+    for _, g in ipairs(DERPY_MR_STORES_GOODS) do if g.stem == stem then return g.use end end
 end
 
 -- THE HISTORY (flows spec section 7), read from the flows script. Without it: none, no error.
@@ -322,6 +351,54 @@ function S.cut_tip(cut, turns)
     return table.concat(lines, "\n")
 end
 
+-- AGREEMENT CONVOYS (flows.lua F.convoy_cargo lists every faction's): the viewer's own, going out or coming in.
+function S.convoys_of(fk)
+    local out = {}
+    for _, c in ipairs(S.ask("convoy_cargo") or {}) do
+        if c.f == fk or c.buyer == fk then out[#out + 1] = c end
+    end
+    return out
+end
+
+-- "40 Coal, 12 Iron": a basket, the most first, equal amounts by name
+function S.basket_text(basket)
+    local stems = {}
+    for stem in pairs(basket or {}) do stems[#stems + 1] = stem end
+    table.sort(stems, function(a, b)
+        if basket[a] ~= basket[b] then return basket[a] > basket[b] end
+        return a < b
+    end)
+    local parts = {}
+    for _, stem in ipairs(stems) do parts[#parts + 1] = S.num(basket[stem]) .. " " .. S.name(stem) end
+    return table.concat(parts, ", ")
+end
+
+S.CONVOY_LINES = 8   -- convoys a Cargo on the road tooltip names, soonest first; any more are counted
+
+function S.convoy_tip(convoys)
+    local sh = S.flows("SHIP")
+    local lines = { "What your trade agreements have on the road. Each lands in the buyer's capital on the turn shown, "
+        .. "and an army at war with the sender, within " .. ((sh and sh.near) or 3)
+        .. " hexes of it when the sender's turn begins, can seize it." }
+    local soon = {}
+    for i, c in ipairs(convoys) do soon[i] = c end
+    -- equal turns in the order the convoys left: by the number in the id, since "10" sorts before "9" as text
+    local function seq(c) return tonumber(string.match(c.id, "%d+$")) or 0 end
+    table.sort(soon, function(a, b)
+        if a.due ~= b.due then return a.due < b.due end
+        if seq(a) ~= seq(b) then return seq(a) < seq(b) end
+        return a.id < b.id
+    end)
+    for i = 1, math.min(#soon, S.CONVOY_LINES) do
+        local c = soon[i]
+        lines[#lines + 1] = "From " .. S.place(c.from) .. " to " .. S.place(c.to) .. ", arrives turn " .. tostring(c.due)
+            .. ": " .. S.basket_text(c.basket)
+    end
+    local more = #soon - S.CONVOY_LINES
+    if more > 0 then lines[#lines + 1] = "and " .. more .. " more " .. (more == 1 and "convoy" or "convoys") end
+    return table.concat(lines, "\n")
+end
+
 function S.duty_tip(d, pct)
     local lines = { "Each turn you pay every trade partner within reach " .. pct .. "% of the value of what its settlements make, "
         .. "and each partner pays you the same on what yours make. Last turn:" }
@@ -423,7 +500,7 @@ function S.send_tip(plan, d, coming)
         local from = loc("regions_onscreen_" .. plan.from:name(), plan.from:name())
         local sh = S.flows("SHIP")
         out = "Ship " .. S.num(plan.n) .. " " .. d.name .. " from " .. from .. ": " .. S.num(plan.got)
-            .. " arrive in " .. turns(plan.turns or (sh and sh.turns) or 2) .. ", " .. S.num(plan.n - plan.got)
+            .. " arrive in at least " .. turns(plan.turns or (sh and sh.turns) or 2) .. ", " .. S.num(plan.n - plan.got)
             .. " are lost on the way. An army at war with you can seize it on the road."
     elseif d.full then
         out = "This store of " .. d.name .. " is full."
@@ -487,12 +564,29 @@ function S.order_tip(o, st)
     return out .. "Your stores hold " .. S.num(st.have) .. ". Click to buy it."
 end
 
+-- Cover is turns of the good's use in store (bulk goods), counted over the whole category; fullness is the store's percent (the rest).
+function S.price_tip(q, use)
+    local word = q.mult < 100 and "cheap here" or q.mult > 100 and "dear here" or "fair price"
+    local state = q.cover and (turns(q.cover) .. " of " .. (S.USE_WORD[use] or use) .. " in store") or ("Store " .. S.num(q.fullness) .. "% full")
+    return "Price " .. S.money(q.price) .. " (" .. S.num(q.mult) .. "% of " .. S.money(q.base) .. "). "
+        .. state .. ", " .. word .. ". Buyers pay " .. S.money(q.buy) .. ", sellers get " .. S.money(q.sell) .. "."
+end
+
+S.SELL_LOTS = 8   -- lots a Sell tooltip names; any more are counted
+
 function S.sell_tip(sale, name)
     if sale then
-        return "Sell " .. S.num(sale.n) .. " " .. name .. " for " .. S.num(sale.gold)
-            .. " gold: what your stores hold above half their space."
+        local out = "Sell " .. S.num(sale.n) .. " " .. name .. " for " .. S.num(sale.gold)
+            .. " gold, " .. S.money(sale.price) .. " each: what your stores hold above half their space."
+        local lots = sale.lots or {}
+        for i = 1, math.min(#lots, S.SELL_LOTS) do
+            out = out .. "\n" .. S.num(lots[i].n) .. " from " .. S.place(lots[i].region) .. " at " .. S.money(lots[i].price)
+        end
+        local more = #lots - S.SELL_LOTS
+        if more > 0 then out = out .. "\nand " .. more .. " more " .. (more == 1 and "store" or "stores") end
+        return out
     end
-    return "Nothing to sell: your stores of " .. name .. " are no more than half full."
+    return "Nothing to sell: your stores of " .. name .. " hold no more than half their space, or what is over would not fetch a whole gold."
 end
 
 -- THE PANEL'S SHADERS, CA's own, at the values CA's ui packs use most for that meaning (counted
@@ -579,7 +673,7 @@ function S.trade_focus(v)
         local n = c.policy[field]
         local value = n ~= nil and S.num(n) or ("Auto: " .. S.num(c[field]))
         local tip = field == "keep" and "Protects outgoing trade, shipments and surplus sales in every settlement. Spending and enemy seizure can use this stock."
-            or ("Trade partners deliver toward this target at " .. S.place(c.capital) .. ". Domestic shipments use free space. Zero stops requests for this resource.")
+            or ("Trade partners deliver toward this target at " .. S.place(c.capital) .. " while it is worth at least 10% more here than in their stores. Domestic shipments use free space. Zero stops requests for this resource.")
         if n == nil and shared then tip = tip .. " Auto is shared by common " .. word .. ", not reserved for each good." end
         v.rows[#v.rows + 1] = { label, value, "", "", "", policy = field, stem = S.focus, tip = tip }
     end
@@ -588,6 +682,9 @@ function S.trade_focus(v)
     v.rows[#v.rows + 1] = { "Capital: " .. S.place(c.capital), "", "", "", "" }
     v.rows[#v.rows + 1] = { "Held / incoming", S.num(x.held[stem] or 0) .. " / " .. S.num(x.incoming[stem] or 0), "", "", "" }
     v.rows[#v.rows + 1] = { "Remaining import need", S.num(S.ask("import_need", x, stem) or 0), "", "", "" }
+    local q = S.ask("quote", x.faction, x.region, stem)
+    v.rows[#v.rows + 1] = { "Price at capital", q and S.money(q.price) or "-", "", "", "",
+        tip = "Partners send this good only while it is worth at least 10% more here than in their stores. A full store is cheap and an empty one dear." }
     local stopped = S.flows("stopped")
     if stopped then
         local fk = x.faction:name()
@@ -614,7 +711,7 @@ function S.trade_focus(v)
         open = "routes:" .. c.capital .. ":" .. stem, tip = "Choose a named source for recurring deliveries to this capital." } end
 end
 
-S.ROUTE_TIP = "Each cart carries up to 100 gross units; 10% is lost at dispatch. Travel takes 1–6 owner turns by coordinate distance, without road or sea pathfinding. Source Keep, trade holds and cart limits apply."
+S.ROUTE_TIP = "Each cart carries up to 100 gross units; 10% is lost at dispatch. A cart takes 1 to 6 turns, by the length of its road. Source Keep, trade holds and cart limits apply."
 
 function S.route_offers(v)
     v.title, v.heads = "Create a supply route", { "Source", "Surplus", "Travel", "Gold / unit", "" }
@@ -638,7 +735,8 @@ function S.route_offers(v)
             local x = S.ask("stock_view", seller, from)
             local available = x and S.ask("available_stock", x, stem) or 0
             if from:name() ~= rkey and available > 1 then
-                local price = seller:name() ~= f:name() and math.max(1, math.floor((S.flows("SELL_RATE") or {})[good.use] or 0)) or 0
+                local partner = seller:name() ~= f:name()
+                local price = partner and S.ask("cart_price", seller, from, f, to, stem)
                 local target = math.min(100, S.ask("free", to, stem) or 100)
                 if target < 1 then target = 100 end
                 local test = {seller=seller:name(),from=from:name(),to=rkey,stem=stem}
@@ -646,9 +744,9 @@ function S.route_offers(v)
                 for _, o in ipairs(S.ask("routes", f) or {}) do
                     if o.from == from:name() and o.to == rkey and o.stem == stem then valid = nil end
                 end
-                local tip = S.name(stem) .. " to " .. S.place(rkey) .. ". Target " .. target .. "; batch 100. " .. S.ROUTE_TIP
-                if price > 0 then tip = tip .. "\nAccepts a fixed price of " .. price .. " gold per delivered unit. Only dispatched batches reserve gold; at most 90 units per cart. The seller is paid after delivery. Cancellation or loss refunds unpaid escrow. War or a lost destination returns net cargo to the seller." end
-                v.rows[#v.rows + 1] = { S.place(from:name()), S.num(available), turns(S.ask("route_turns", from, to) or 2), price > 0 and S.num(price) or "Internal",
+                local tip = S.name(stem) .. " to " .. S.place(rkey) .. ". Target " .. target .. "; batch 100. " .. S.ROUTE_TIP .. " Travel shows the least it can take."
+                if partner then tip = tip .. "\nEach cart costs the seller's price plus 10% when it leaves, or what the goods would sell for at your store if that is more. Only dispatched carts reserve gold; at most 90 units per cart. The seller is paid after delivery. Cancellation or loss refunds unpaid escrow. War or a lost destination returns net cargo to the seller." end
+                v.rows[#v.rows + 1] = { S.place(from:name()), S.num(available), "at least " .. turns(S.ask("route_turns", from, to) or 2), partner and (price and S.money(price) or "-") or "Internal",
                     "", tip = tip, route_request = { "route_new", from:name(), rkey, stem, tostring(target), "100" },
                     send = { label = "Create", tip = tip, off = not valid } }
             end
@@ -669,7 +767,14 @@ function S.route_view(v)
         v.rows[#v.rows + 1] = { field == "target" and "Net stock target" or "Gross batch limit", S.num(o[field]), "", "", "",
             policy = field, route = id, tip = "Step 10. Default 100. Target subtracts stock and incoming net cargo; batch is 2–100 gross." }
     end
-    v.rows[#v.rows + 1] = { o.price and ("Locked price: " .. o.price .. " gold / delivered unit") or "Internal transfer: no gold", "", "", "", "" }
+    if o.seller ~= f:name() then
+        local terms = S.ask("route_status", f, o, "show")
+        local now = terms and S.ask("cart_price", terms.seller, terms.from, f, terms.to, o.stem)
+        v.rows[#v.rows + 1] = { "Price per delivered unit", o.last_price_c and S.money(o.last_price_c) or "Set per cart", "", "", "",
+            tip = "Each cart costs the seller's price plus 10% when it leaves, or what the goods would sell for at your store if that is more. Shows the last cart's price. Next cart: " .. (now and S.money(now) or "-") .. "." }
+    else
+        v.rows[#v.rows + 1] = { "Internal transfer: no gold", "", "", "", "" }
+    end
     local escrow = 0
     for _, s in ipairs(S.ask("ships") or {}) do
         if s.f == f:name() and s.route == id then escrow = escrow + (s.escrow or 0) end
@@ -729,16 +834,16 @@ function S.view_model(realm)
     elseif S.focus and string.sub(S.focus, 1, 6) == "route:" then S.route_view(v)
     elseif S.view == "goods" and S.focus then
         v.title = "Where " .. S.name(S.focus) .. " is kept"
-        v.heads = { "Settlement", "Held / Space", "Per turn", "", "" }
+        v.heads = { "Settlement", "Held / Space", "Per turn", "Price", "" }
+        local f = S.local_faction()
         for _, d in ipairs(S.good_detail(realm, S.focus)) do
             local tip = ""
             if d.full then tip = S.FULL_TIP end
-            v.rows[#v.rows + 1] = { d.name, S.num(d.held) .. " / " .. S.num(d.cap),
-                                    per_turn(d.made), full_mark(d.full), "", tip = tip }
+            local price, sentence = S.price_of(f, f and S.ask("owned", f, d.key), S.focus)
+            v.rows[#v.rows + 1] = { d.name, held_space(d), per_turn(d.made), price, "", tip = add_line(tip, sentence) }
         end
         v.chart = S.chart_model(S.history(S.focus))
         if S.actions_on() then
-            local f = S.local_faction()
             local sale = f and S.ask("sale", f, S.focus)
             v.sell = { tip = S.sell_tip(sale, S.name(S.focus)), off = sale == nil }
         end
@@ -788,6 +893,14 @@ function S.view_model(realm)
             v.rows[#v.rows + 1] = { "Trade cut off", "", "", "", #cut .. (#cut == 1 and " partner" or " partners"),
                                     icon = S.CUT_ICON, tip = S.cut_tip(cut, rates().reach) }
         end
+        -- CARGO ON THE ROAD: how many of your agreements' convoys are leaving and arriving (flows.lua F.convoy_cargo)
+        local convoys = S.convoys_of(fk)
+        if #convoys > 0 then
+            local out = 0
+            for _, c in ipairs(convoys) do if c.f == fk then out = out + 1 end end
+            v.rows[#v.rows + 1] = { "Cargo on the road", "", "", "", S.num(out) .. " out, " .. S.num(#convoys - out) .. " in",
+                                    icon = L.MAP_CART, tip = S.convoy_tip(convoys) }
+        end
         local rows = S.trade_rows(realm)
         local others = 0
         for _, g in ipairs(rows) do if not g.own then others = others + 1 end end
@@ -820,7 +933,7 @@ function S.view_model(realm)
             return S.view_model(realm)
         end
         v.title = "Stores of " .. s.name
-        v.heads = { "Resource", "Held / Space", "Per turn", "", "" }
+        v.heads = { "Resource", "Held / Space", "Per turn", "Price", "" }
         local model_faction = S.local_faction()
         local region = model_faction and S.ask("owned", model_faction, s.key)
         local forecast = region and S.forecast_tip(model_faction, region, s) or ""
@@ -831,8 +944,9 @@ function S.view_model(realm)
         for _, d in ipairs(S.settlement_detail(s)) do
             local tip = S.good_tip(d)
             if d.full then tip = S.FULL_TIP end
-            local row = { d.name, S.num(d.held) .. " / " .. S.num(d.cap),
-                          per_turn(d.made), full_mark(d.full), "", icon = d.icon,
+            local price, sentence = S.price_of(model_faction, region, d.stem)
+            tip = add_line(tip, sentence)
+            local row = { d.name, held_space(d), per_turn(d.made), price, "", icon = d.icon,
                           tip = tip .. "\n" .. forecast, stem = d.stem,
                           open = f and ("routes:" .. s.key .. ":" .. d.stem) or nil }
             if f then
@@ -1384,6 +1498,13 @@ function S.map_model(faction, view)
     end
     table.sort(m.dots, function(a, b) return a.name < b.name end)
     local routes=DERPY_MR_TERRAIN_ROUTES
+    local function cart(s)
+        -- framed: a convoy can start at a partner's capital far from the realm, so it stays on the surface, off the frame
+        local c = { lx = s.x, ly = s.y, s = s, framed = not s.convoy }
+        c.ux, c.uy = u(cm:log_to_dis(s.x, s.y))
+        m.carts[#m.carts + 1] = c
+        return c
+    end
     for _, s in ipairs((not routes or routes.shown('shipments')) and S.ask("ships") or {}) do
         if s.f == faction:name() then
             -- Contract sources can belong to a partner; draw only their referenced endpoint.
@@ -1398,9 +1519,23 @@ function S.map_model(faction, view)
                     end
                 end
             end
-            local c = { lx = s.x, ly = s.y, s = s }
-            c.ux, c.uy = u(cm:log_to_dis(s.x, s.y))
-            m.carts[#m.carts + 1] = c
+            cart(s)
+        end
+    end
+    -- the viewer's agreement convoys, out and in, ride the same road under the same switch, after the shipments' carts;
+    -- one with no position is on the road but has no place to draw (the Trade tab still counts it); convoys on one
+    -- spot (a one-turn convoy waits at its exporter's capital) share the first one's cart, which lists them all
+    local stacked = {}
+    for _, s in ipairs((not routes or routes.shown('shipments')) and S.convoys_of(faction:name()) or {}) do
+        if s.x and s.y then
+            local c = cart(s)
+            local spot = math.floor(c.ux + 0.5) .. ":" .. math.floor(c.uy + 0.5)
+            if stacked[spot] then
+                table.insert(stacked[spot].stack, s)
+                m.carts[#m.carts] = nil
+            else
+                c.stack, stacked[spot] = { s }, c
+            end
         end
     end
     -- THE ROADS ARE THE 3D MAP'S (terrain_routes.lua): its links, its solved paths, its colours,
@@ -1430,7 +1565,7 @@ function S.map_model(faction, view)
         end
     end
     for _, d in ipairs(m.dots) do grow(d.ux, d.uy, true) end
-    for _, c in ipairs(m.carts) do grow(c.ux, c.uy, true) end
+    for _, c in ipairs(m.carts) do grow(c.ux, c.uy, c.framed) end
     for _, r in ipairs(roads) do
         for _, point in ipairs(r) do grow(point[1], point[2], r.own) end
     end
@@ -1492,7 +1627,8 @@ function S.map_model(faction, view)
 end
 
 function S.ship_tip(s)
-    return S.num(s.n) .. " " .. S.name(s.stem) .. " from " .. S.place(s.from) .. " to " .. S.place(s.to)
+    local what = s.convoy and S.basket_text(s.basket) or (S.num(s.n) .. " " .. S.name(s.stem))
+    return what .. " from " .. S.place(s.from) .. " to " .. S.place(s.to)
         .. ", arriving on turn " .. tostring(S.ask("ship_due", s) or s.due) .. ".\nClick to fly there."
 end
 
@@ -2150,7 +2286,7 @@ function S.draw_map(p, m)
         for _, c in ipairs(m.carts) do
             local k = place("cart", c.x, c.y, L.MAP_CART_SIZE)
             if k then
-                k:SetTooltipText(S.ship_tip(c.s), true)
+                k:SetTooltipText(c.stack and #c.stack > 1 and S.convoy_tip(c.stack) or S.ship_tip(c.s), true)
                 S.fx(k, "glow")     -- a convoy on the road pulses, as CA's active markers do
                 S.map_hits[k:Id()] = { c.lx, c.ly }
             end

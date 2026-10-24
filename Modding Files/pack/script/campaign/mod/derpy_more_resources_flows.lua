@@ -754,6 +754,19 @@ function F.fullest(views, stem)
     return best, amount
 end
 
+-- The exporter's cheapest store with stock (one base, so the lowest multiplier is the lowest price); F.cheapest is the recruitment draw's.
+function F.cheapest_store(views, stem)
+    local best, amount, low = nil, 0, nil
+    for _, v in ipairs(views) do
+        local n, mult = F.available_stock(v, stem), F.price_mult(v, stem)
+        -- views arrive sorted by region key, so a full tie keeps the first
+        if n > 0 and mult and (not best or mult < low or (mult == low and n > amount)) then
+            best, amount, low = v, n, mult
+        end
+    end
+    return best, amount
+end
+
 -- Preview only adjusts disposable stock views, in the same partner/good order as a real turn.
 function F.trade(exporter, preview)
     local pct, goods = F.rates().trade, {}
@@ -765,24 +778,43 @@ function F.trade(exporter, preview)
     table.sort(ordered, function(a, b) return a:name() < b:name() end)
     for _, partner in ipairs(ordered) do
         local to = F.capital(partner)
-        if to and F.allowed(exporter:name(), partner:name()) and F.trade_reach(exporter, partner, preview and "peek" or nil) then
+        local open, _, path
+        if to and F.allowed(exporter:name(), partner:name()) then
+            -- the road F.reach just worked out for this pair, kept for the convoy
+            open, _, path = F.trade_reach(exporter, partner, preview and "peek" or nil)
+        end
+        if open then
             sources = sources or F.stock_views(exporter)
-            local dest = F.stock_view(partner, to)
+            local dest, convoy = F.stock_view(partner, to), nil
             for _, g in ipairs(DERPY_MR_FLOWS_GOODS) do
                 if not F.stopped(exporter:name(), "export", g.stem)
                     and not F.stopped(partner:name(), "import", g.stem) then
-                    local source, removable = F.fullest(sources, g.stem)
+                    local source, removable = F.cheapest_store(sources, g.stem)
                     local n = math.min(math.floor(removable * pct / 100), F.import_need(dest, g.stem))
                     if source and n > 0 then
-                        local got = n
-                        if preview then
-                            goods[partner:name()] = goods[partner:name()] or {}
-                            goods[partner:name()][#goods[partner:name()]+1] = g.stem
-                        else
-                            got = F.move(source.region, to, g.stem, n, KIND.trade, exporter:name(), partner:name())
+                        -- uphill only: the destination's price must clear the source's price plus the spread
+                        local ps, pd = F.local_price(source, g.stem, exporter:name()), F.local_price(dest, g.stem, partner:name())
+                        if pd ~= nil and ps ~= nil and pd >= F.buy_price(ps) then
+                            local sent = true
+                            if preview then
+                                goods[partner:name()] = goods[partner:name()] or {}
+                                goods[partner:name()][#goods[partner:name()]+1] = g.stem
+                            elseif F.route_goods(source.region, g.stem, -n, KIND.trade) then
+                                -- AGREEMENT CARGO (spec 2026-10-23, 5.1): debited here, landed when the convoy arrives.
+                                -- The convoy is made at the FIRST good taken and each later good joins it at once, so a
+                                -- throw at a later good leaves what was already taken on the road, not lost.
+                                convoy = convoy or F.convoy_new(exporter, partner, {}, path)
+                                convoy.basket[g.stem] = (convoy.basket[g.stem] or 0) + n
+                                F.log(exporter:name(), g.stem, KIND.trade .. "_out", n)
+                            else
+                                sent = false   -- the engine refused the debit: nothing left, nothing to count
+                            end
+                            -- the views keep a good sent this round from being sent again to the next partner
+                            if sent then
+                                F.stock_adjust(source, g.stem, -n)
+                                F.stock_adjust(dest, g.stem, n)
+                            end
                         end
-                        F.stock_adjust(source, g.stem, -n)
-                        F.stock_adjust(dest, g.stem, got)
                     end
                 end
             end
@@ -2050,32 +2082,95 @@ function F.price(g, fkey)
     return DERPY_MR_FLOWS_SELL_RATE[g.use] or 0
 end
 
+-- The game's compiler miscompiles a literal left of an operator, so 100 is F.PCT and literals go right.
+F.PCT, F.PRICE_SWING, F.SPREAD = 100, 75, 10
+
+local function clamp_pct(n) return math.max(-F.PCT, math.min(F.PCT, n)) end
+
+-- Returns the multiplier, then the cover in turns (consumed branch) or the fullness percent.
+local function price_state(v, stem)
+    local g, held, cap = F.GOOD[stem], v.held[stem] or 0, v.capacity[stem]
+    if not g or not cap or cap <= 0 then return nil end
+    local use = v.recurring[g.use] or 0
+    local imbalance, turns, fullness
+    if F.bulk(g.use)(g) and use > 0 then
+        local cover = math.floor((v.totals[g.use] or 0) / use)
+        turns = cover
+        imbalance = clamp_pct(math.floor((F.SHIP.ai_on - cover) * F.PCT / F.SHIP.ai_on))
+    else
+        fullness = math.floor(held * F.PCT / cap)
+        imbalance = clamp_pct(F.PCT - math.floor(held * 200 / cap))
+    end
+    return math.floor(F.PRICE_SWING * imbalance / F.PCT) + F.PCT, turns, fullness
+end
+
+function F.price_mult(v, stem) return (price_state(v, stem)) end
+
+local function base_price(stem, fkey) return math.floor(F.price(F.GOOD[stem], fkey) * F.PCT) end
+
+function F.local_price(v, stem, fkey)
+    local mult = F.price_mult(v, stem)
+    if not mult then return nil end
+    return F.gold(base_price(stem, fkey), mult)
+end
+
+function F.buy_price(c) return math.floor(c * (F.SPREAD + F.PCT) / F.PCT) end
+function F.sell_price(c) return math.floor(c * F.PCT / (F.SPREAD + F.PCT)) end
+function F.gold(n, c) return math.floor(n * c / F.PCT) end
+
+function F.quote(faction, region, stem)
+    local v = F.stock_view(faction, region)
+    local mult, cover, fullness = price_state(v, stem)
+    if not mult then return nil end
+    local base = base_price(stem, faction:name())
+    local price = F.gold(base, mult)
+    return { price = price, buy = F.buy_price(price), sell = F.sell_price(price), mult = mult,
+             base = base, cover = cover, fullness = fullness }
+end
+
+-- A partner cart never costs less than its goods sell for where they land: otherwise buying from a full partner and selling the surplus at your own store makes gold.
+function F.cart_price(seller, from, buyer, to, stem)
+    local ps = F.local_price(F.stock_view(seller, from), stem, seller:name())
+    if not ps then return nil end
+    local pd = F.local_price(F.stock_view(buyer, to), stem, buyer:name())
+    return math.max(F.buy_price(ps), pd and F.sell_price(pd) or 0)
+end
+
+-- Lots go most available first, then by region key; price is the lot-weighted average unit price (hundredths), gold the sum of floored lot golds.
 function F.sale(faction, stem)
-    local g = F.GOOD[stem]
-    if not g then return nil end
-    local total, space, removable = 0, 0, 0
-    for _, v in ipairs(F.stock_views(faction)) do
+    if not F.GOOD[stem] then return nil end
+    local fkey, views, avail, total, space = faction:name(), F.stock_views(faction), {}, 0, 0
+    for _, v in ipairs(views) do
         total = total + (v.held[stem] or 0)
         space = space + (v.capacity[stem] or 0)
-        removable = removable + F.available_stock(v, stem)
+        avail[v] = F.available_stock(v, stem)
     end
-    local n = math.min(removable, total - math.floor(space / 2))
-    if n <= 0 then return nil end
-    local price = F.price(g, faction:name())
-    local gold = math.floor(n * price)
+    table.sort(views, function(a, b)
+        if avail[a] ~= avail[b] then return avail[a] > avail[b] end
+        return a.region:name() < b.region:name()
+    end)
+    local left, n, gold, weighted, lots = total - math.floor(space / 2), 0, 0, 0, {}
+    for _, v in ipairs(views) do
+        local k = math.min(left, avail[v])
+        if k > 0 and F.price_mult(v, stem) then
+            local price = F.sell_price(F.local_price(v, stem, fkey))
+            local pay = F.gold(k, price)
+            if pay > 0 then
+                lots[#lots + 1] = { region = v.region:name(), from = v.region, n = k, price = price }
+                n, left = n + k, left - k
+                gold, weighted = gold + pay, weighted + k * price
+            end
+        end
+    end
     if gold <= 0 then return nil end
-    return { n = n, price = price, gold = gold }
+    return { n = n, price = math.floor(weighted / n), gold = gold, lots = lots }
 end
 
 function F.sell(faction, stem)
     local s = F.sale(faction, stem)
     if not s then return end
     local fkey = faction:name()
-    local stocks = {}
-    for _, v in ipairs(F.stock_views(faction)) do
-        stocks[#stocks + 1] = { region = v.region, held = { [stem] = F.available_stock(v, stem) } }
-    end
-    F.draw_realm(stocks, function(g) return g.stem == stem end, s.n, KIND.sell, fkey)
+    for _, lot in ipairs(s.lots) do F.move(lot.from, nil, stem, lot.n, KIND.sell, fkey, nil) end
     cm:treasury_mod(fkey, s.gold)
 end
 
@@ -2375,11 +2470,16 @@ end
 F.CART_MAX, F.ROUTE_MAX = 100, 50
 F.SELL_RATE = DERPY_MR_FLOWS_SELL_RATE
 
-function F.route_turns(from, to)
+-- A saved road is its hexes (F.road_steps) at F.ROAD_PER_TURN, as F.convoy_turns counts them, with a shipment's own ceiling of six turns.
+-- The panel asks with no road (a search per refresh is too dear), so its figure is the straight-line lower bound and reads "at least".
+function F.route_turns(from, to, road)
+    if road and #road > 0 then
+        return math.max(1, math.min(6, math.ceil(F.road_steps(road) / F.ROAD_PER_TURN)))
+    end
     local a, b = from:settlement(), to:settlement()
     local dx, dy = a:logical_position_x() - b:logical_position_x(), a:logical_position_y() - b:logical_position_y()
-    -- ponytail: straight-line coordinates only; use verified path data before adding road or sea rules.
-    return math.max(1, math.min(6, math.ceil(math.sqrt(dx * dx + dy * dy) / 40)))
+    -- ponytail: no saved road means the longer span, a true lower bound (every step and bridge costs its own span), not the Euclidean distance.
+    return math.max(1, math.min(6, math.ceil(math.max(math.abs(dx), math.abs(dy)) / F.ROAD_PER_TURN)))
 end
 
 function F.ship_due(s) return s.due or (s.at + F.SHIP.turns) end
@@ -2420,6 +2520,7 @@ function F.route_status(faction, o, mode)
     if F.stopped(o.seller, "export", o.stem) or F.stopped(faction:name(), "import", o.stem) then
         return nil, "Imports or exports stopped"
     end
+    if o.seller ~= faction:name() and not F.pool(from, o.stem) then return nil, "No price at the source" end
     return { from = from, to = to, seller = seller }, "Ready"
 end
 
@@ -2436,9 +2537,6 @@ function F.route_create(faction, from_key, to_key, stem, target, batch)
     end
     local o = { from = from_key, to = to_key, stem = stem, seller = seller, target = target, batch = batch, enabled = true }
     if not F.route_status(faction, o) then return nil end
-    if seller ~= faction:name() then
-        o.price = math.max(1, math.floor(DERPY_MR_FLOWS_SELL_RATE[F.GOOD[stem].use] or 0))
-    end
     F.state.route_seq = (F.state.route_seq or 0) + 1
     o.id = tostring(F.state.route_seq)
     local b = F.book(faction:name()); b.routes = b.routes or {}; b.routes[o.id] = o
@@ -2479,10 +2577,11 @@ function F.route_covers(faction, rkey, use)
     return false
 end
 
--- Verify native debits before publishing cargo or escrow. Restore a partial write on failure.
-function F.route_goods(region, stem, delta)
+-- Verify native debits before publishing cargo or escrow. Restore a partial write on failure. `kind` is the
+-- factor the engine books it under (what the resource's breakdown calls it); nil is KIND.move.
+function F.route_goods(region, stem, delta, kind)
     local before = F.held(region, stem)
-    local key = F.PREFIX .. stem .. "_" .. KIND.move
+    local key = F.PREFIX .. stem .. "_" .. (kind or KIND.move)
     local ok = pcall(function() cm:entity_add_pooled_resource_transaction(region, key, delta) end)
     if ok and F.held(region, stem) == before + delta then return true end
     local restore = before - F.held(region, stem)
@@ -2505,7 +2604,7 @@ end
 function F.route_settle(s, delivered)
     if not s.sender or s.settled then return end
     s.settled = true
-    local pay = math.min(s.escrow, delivered * s.price)
+    local pay = math.min(s.escrow, F.gold(delivered, s.price_c))
     local refund = s.escrow - pay
     F.state.contracts = F.state.contracts or { paid = 0, refunded = 0, lost = 0 }
     local book = F.state.contracts
@@ -2557,9 +2656,10 @@ function F.sanitize_routes()
             local n = tonumber(id)
             if type(o) == "table" and n and F.stock_number(n) and n > 0 and o.id == id and F.GOOD[o.stem]
                 and type(o.from) == "string" and type(o.to) == "string" and type(o.seller) == "string"
-                and F.stock_number(o.target) and o.target > 0 and F.stock_number(o.batch) and o.batch >= 2 and o.batch <= F.CART_MAX
-                and (o.price == nil or (F.stock_number(o.price) and o.price > 0 and o.price <= 1000000)) then
+                and F.stock_number(o.target) and o.target > 0 and F.stock_number(o.batch) and o.batch >= 2 and o.batch <= F.CART_MAX then
                 clean[id] = o; max_id = math.max(max_id, n)
+                o.price = nil
+                if not F.stock_number(o.last_price_c) then o.last_price_c = nil end
                 if o.done ~= nil and not F.stock_number(o.done) then o.done = nil end
                 o.enabled = o.enabled == true
             end
@@ -2567,6 +2667,19 @@ function F.sanitize_routes()
         b.routes = next(clean) and clean or nil
     end
     F.state.route_seq = math.max(max_id, F.stock_number(F.state.route_seq) and F.state.route_seq or 0)
+end
+
+-- A save from before local prices holds the cart's price as whole gold; one with escrow and no
+-- price at all is unreadable, so it settles at 0: the buyer gets the escrow back whole.
+function F.sanitize_ships()
+    for _, s in ipairs(F.ships()) do
+        if type(s) == "table" then
+            if s.escrow ~= nil and not F.stock_number(s.price_c) then
+                s.price_c = F.stock_number(s.price) and s.price * F.PCT or 0
+            end
+            s.price = nil
+        end
+    end
 end
 
 -- THE ONE DOOR. parts = {action, args...}: a trade switch (export|import, stem), or an action
@@ -2978,11 +3091,24 @@ function F.ship_cap(faction)
     return F.SHIP.ai_cap
 end
 
--- What is on the road to a store, in the order it left; every good when stem is nil.
+-- What is on the road to a store: the shipments in the order they left, then each agreement convoy's goods (one entry
+-- a good, in goods order, carrying the convoy's arrival turn); every good when stem is nil.
 function F.ships_to(fkey, rkey, stem)
     local out = {}
     for _, s in ipairs(F.ships()) do
         if (s.recipient or s.f) == fkey and s.to == rkey and (stem == nil or s.stem == stem) then out[#out + 1] = s end
+    end
+    for _, c in ipairs(F.convoys()) do
+        if c.buyer == fkey and c.to == rkey then
+            local due   -- looked up only for a convoy that lists something: F.incoming filters by good on the hot path
+            for _, g in ipairs(DERPY_MR_FLOWS_GOODS) do
+                local n = c.basket[g.stem]
+                if n and n > 0 and (stem == nil or g.stem == stem) then
+                    due = due or F.convoy_due(c)
+                    out[#out + 1] = { stem = g.stem, n = n, due = due, convoy = c.id }
+                end
+            end
+        end
     end
     return out
 end
@@ -3247,10 +3373,12 @@ function F.ship(faction, from, to, stem, n, order)
         if not terms then return nil end
         seller = terms.seller
     end
+    local partner = order and seller:name() ~= fkey
     if not F.owned(seller, from:name()) or not F.owned(faction, to:name()) then return nil end
     if F.stopped(seller:name(), "export", stem) or F.stopped(fkey, "import", stem) then return nil end
     if F.ship_count(fkey) >= F.ship_cap(faction) then return nil end
     local source = F.stock_view(seller, from)
+    if partner and not F.price_mult(source, stem) then return nil end   -- a store of no capacity quotes nothing
     local free = F.free(to, stem) - F.incoming(fkey, to:name(), stem)
     if order then free = math.min(free, order.target - F.held(to, stem) - F.incoming(fkey, to:name(), stem)) end
     local fit = F.fit_delivery(math.min(n, F.CART_MAX, order and order.batch or F.CART_MAX, F.available_stock(source, stem)), free)
@@ -3259,7 +3387,12 @@ function F.ship(faction, from, to, stem, n, order)
     local got = fit.got
     local R = DERPY_MR_TERRAIN_ROUTES
     local road = R and R.journey and R.journey(from, to) or nil
-    local escrow = order and order.price and got * order.price or 0
+    local escrow, price_c = 0, nil
+    if partner then
+        local c = F.cart_price(seller, from, faction, to, stem)
+        escrow, price_c = F.gold(got, c), c
+    end
+    if partner and escrow <= 0 then return nil end   -- a cart worth under one gold would deliver for nothing
     if escrow > faction:treasury() then return nil end
     if escrow > 0 and not F.route_gold(faction, -escrow) then return nil end
     if not F.route_goods(from, stem, -n) then
@@ -3270,10 +3403,13 @@ function F.ship(faction, from, to, stem, n, order)
     F.state.ship_seq = (F.state.ship_seq or 0) + 1
     local s = { id = F.SHIP_PREFIX .. F.state.ship_seq, f = fkey, stem = stem, n = got, from = from:name(),
                 to = to:name(), at = cm:model():turn_number(), leg = 1, gross = n, road = road }
-    s.duration = F.route_turns(from, to)
+    s.duration = F.route_turns(from, to, road)
     s.due = s.at + s.duration
     if order then s.route = order.id end
-    if escrow > 0 then s.sender, s.recipient, s.price, s.escrow = seller:name(), fkey, order.price, escrow end
+    if partner then
+        s.sender, s.recipient, s.price_c, s.escrow = seller:name(), fkey, price_c, escrow
+        order.last_price_c = price_c
+    end
     if road and #road > 0 then s.x, s.y = road[1][1], road[1][2]
     else s.x, s.y = F.spot(fkey, from) end
     F.escort_roll(faction, s)
@@ -3302,26 +3438,43 @@ function F.seize(s, captor)
     F.move(nil, F.nearest(captor, s.x, s.y), s.stem, s.n, KIND.raid, nil, captor:name())
 end
 
--- An army in the field (no garrison) of a faction at war with the owner, within SHIP.near: the
--- faction and the force. A PLAYER TAKES A COMPUTER'S ESCORTED CART ONLY BY WALKING IN, where the
--- raid is asked first, so a human army standing by one at the computer's turn start is passed over.
-function F.captor(owner, s)
-    local wars = owner:factions_at_war_with()
-    if type(wars) ~= "table" and type(wars) ~= "userdata" then return nil end
-    local skip_human = F.escorts_on() and not owner:is_human() and (s.escort or "") ~= ""
-    local r2 = F.SHIP.near * F.SHIP.near
-    for i = 0, wars:num_items() - 1 do
-        local o = wars:item_at(i)
-        if not (skip_human and o:is_human()) then
+-- Every army in the field (no garrison) of a faction at war with `owner`: { f = faction, mf = force, x, y },
+-- worked out ONCE PER OWNER PER TURN. F.captor reads it for shipments and convoys alike, so a few hundred
+-- convoys do not each rescan every enemy army. Not saved: it is rebuilt by the first question of a turn.
+F.enemy_cache = F.enemy_cache or {}
+function F.enemy_armies(owner)
+    local key, turn = owner:name(), cm:model():turn_number()
+    local hit = F.enemy_cache[key]
+    if hit and hit.turn == turn then return hit.list end
+    local list, wars = {}, owner:factions_at_war_with()
+    if type(wars) == "table" or type(wars) == "userdata" then
+        for i = 0, wars:num_items() - 1 do
+            local o = wars:item_at(i)
             local mfl = o:military_force_list()
             for j = 0, mfl:num_items() - 1 do
                 local mf = mfl:item_at(j)
                 if not mf:is_armed_citizenry() and mf:has_general() then
                     local ch = mf:general_character()
-                    local dx, dy = ch:logical_position_x() - s.x, ch:logical_position_y() - s.y
-                    if dx * dx + dy * dy <= r2 then return o, mf end
+                    list[#list + 1] = { f = o, mf = mf, x = ch:logical_position_x(), y = ch:logical_position_y() }
                 end
             end
+        end
+    end
+    F.enemy_cache[key] = { turn = turn, list = list }
+    return list
+end
+
+-- An army in the field (no garrison) of a faction at war with the owner, within SHIP.near: the
+-- faction and the force. A PLAYER TAKES A COMPUTER'S ESCORTED CART ONLY BY WALKING IN, where the
+-- raid is asked first, so a human army standing by one at the computer's turn start is passed over.
+function F.captor(owner, s)
+    local skip_human = F.escorts_on() and not owner:is_human() and (s.escort or "") ~= ""
+    local r2 = F.SHIP.near * F.SHIP.near
+    for _, e in ipairs(F.enemy_armies(owner)) do
+        -- a force an escort battle earlier in this turn start destroyed is a null interface by now
+        if not (skip_human and e.f:is_human()) and not e.mf:is_null_interface() then
+            local dx, dy = e.x - s.x, e.y - s.y
+            if dx * dx + dy * dy <= r2 then return e.f, e.mf end
         end
     end
     return nil
@@ -3406,6 +3559,208 @@ function F.ships_turn(faction)
     end
 end
 
+-- ---- agreement convoys (spec 2026-10-23, section 5.1) ---------------------------------------
+-- What an agreement carries leaves the exporter as one convoy per partner per turn and rides the road
+-- F.reach found for the pair. The record is small: its road is one packed string, "x:y;x:y".
+F.CONVOY_PREFIX = "derpy_mr_cv_"
+
+-- A new list, never the one given: F.reach keeps its path in F.reach_known, and the partner's trade in
+-- the same turn reads that same table.
+function F.reverse(list)
+    local out = {}
+    for i = #list, 1, -1 do out[#out + 1] = list[i] end
+    return out
+end
+
+function F.pack_road(path)
+    if not path or #path == 0 then return nil end
+    local parts = {}
+    for i, p in ipairs(path) do parts[i] = p[1] .. ":" .. p[2] end
+    return table.concat(parts, ";")
+end
+
+function F.unpack_road(s)
+    if type(s) ~= "string" then return nil end
+    local path = {}
+    for x, y in string.gmatch(s, "(%d+):(%d+)") do path[#path + 1] = { tonumber(x), tonumber(y) } end
+    if #path == 0 then return nil end
+    return path
+end
+
+-- A read, like F.ships: only F.convoy_new makes the list.
+function F.convoys()
+    return F.state.convoys or {}
+end
+
+-- A convoy lands at its exporter's turn start; a human buyer, who plays first in the round, has it a turn later.
+function F.convoy_due(c)
+    local ex, buyer = F.live(c.f), F.live(c.buyer)
+    if buyer and buyer:is_human() and not (ex and ex:is_human()) then return c.due + 1 end
+    return c.due
+end
+
+-- WHAT THE VAULT AND THE MAPS READ (spec 2026-10-23, section 6): one entry for each convoy whose exporter is still alive,
+-- in the order the convoys left, each naming the good it carries most of (equal amounts: the lower stem). A dead
+-- exporter's convoys stay in the list until a player's turn start sweeps them (F.sweep) and are not on the road in
+-- between. A convoy with no position (x, y nil) is still on the road and still listed: the Vault counts it, and only
+-- what places a marker (R.links, S.map_model) leaves it out. Every faction's: the consumers pick the viewer's.
+-- `due` is the turn the buyer first has the goods (F.convoy_due), which a human buyer finds a turn after the landing.
+function F.convoy_cargo()
+    local out = {}
+    for _, c in ipairs(F.convoys()) do
+        if F.live(c.f) then
+            local stem, n
+            for k, v in pairs(c.basket) do
+                if not n or v > n or (v == n and k < stem) then stem, n = k, v end
+            end
+            out[#out + 1] = { id = c.id, f = c.f, buyer = c.buyer, from = c.from, to = c.to, at = c.at, due = F.convoy_due(c),
+                              x = c.x, y = c.y, stem = stem, n = n, basket = c.basket, convoy = true }
+        end
+    end
+    return out
+end
+
+-- Hexes on a road. A bridge is one point but as many hexes as the reach search charged it (R.advance: max(1, |dx|, |dy|)).
+function F.road_steps(path)
+    local steps = 0
+    for i = 2, #path do
+        steps = steps + math.max(1, math.abs(path[i][1] - path[i - 1][1]), math.abs(path[i][2] - path[i - 1][2]))
+    end
+    return steps
+end
+
+-- Turns on the road: its hexes at F.ROAD_PER_TURN, never under one and never past the trade reach (the
+-- reach limit is in hexes too); no road, one turn.
+function F.convoy_turns(path)
+    if not path then return 1 end
+    return math.max(1, math.min(F.rates().reach, math.ceil(F.road_steps(path) / F.ROAD_PER_TURN)))
+end
+
+-- The record, filed in F.state.convoys. `path` is as F.reach returned it, which F.reach sorted by region name:
+-- turned into a new table when it starts at the buyer, so the road always leaves the exporter's capital.
+function F.convoy_new(exporter, buyer, basket, path)
+    local from, to = F.capital(exporter), F.capital(buyer)
+    -- no settlement on the capital: no position, never a throw, since this runs after a good was debited
+    local home, hx, hy = from:settlement(), nil, nil
+    if not home:is_null_interface() then hx, hy = home:logical_position_x(), home:logical_position_y() end
+    local turn = cm:model():turn_number()
+    local c = { f = exporter:name(), buyer = buyer:name(), from = from:name(), to = to:name(),
+                basket = basket, at = turn, x = hx, y = hy }
+    if path and #path > 0 then
+        -- without a position the road cannot be oriented and is kept as F.reach gave it
+        if hx then
+            if path[1][1] ~= hx or path[1][2] ~= hy then path = F.reverse(path) end
+        end
+        c.road, c.x, c.y = F.pack_road(path), path[1][1], path[1][2]
+    end
+    c.due = turn + F.convoy_turns(path)
+    F.state.convoy_seq = (F.state.convoy_seq or 0) + 1
+    c.id = F.CONVOY_PREFIX .. F.state.convoy_seq
+    F.state.convoys = F.state.convoys or {}
+    F.state.convoys[#F.state.convoys + 1] = c
+    return c
+end
+
+-- A saved record the convoy code can read: the number in its id when it can, nil when it cannot. Each rule is a
+-- type or a range the code downstream assumes: a basket entry that is not a good, a due that is not a number or an
+-- amount that is not whole would throw in F.ships_to, F.stock_view or the turn's step, long after the load.
+function F.convoy_sound(c)
+    if type(c) ~= "table" or type(c.id) ~= "string" then return nil end
+    local n = tonumber(string.match(c.id, "^" .. F.CONVOY_PREFIX .. "(%d+)$"))
+    if not (n and F.stock_number(n)) then return nil end
+    if not (type(c.f) == "string" and type(c.buyer) == "string" and type(c.from) == "string" and type(c.to) == "string") then return nil end
+    if type(c.basket) ~= "table" or next(c.basket) == nil then return nil end
+    for stem, k in pairs(c.basket) do
+        if not (F.GOOD[stem] and F.stock_number(k) and k > 0) then return nil end
+    end
+    if not (F.stock_number(c.at) and F.stock_number(c.due) and c.due >= c.at) then return nil end
+    -- a position is the pair or nothing: no settlement on the capital and no road writes neither
+    if (c.x ~= nil or c.y ~= nil) and not (F.stock_number(c.x) and F.stock_number(c.y)) then return nil end
+    if c.road ~= nil and not F.unpack_road(c.road) then return nil end
+    return n
+end
+
+-- Run from the load callback. A save with no list stays without one (only F.convoy_new makes it); the sequence
+-- is the larger of the kept ids and the saved one, as F.sanitize_routes keeps its own, so a delivered
+-- convoy's number is not handed out twice.
+function F.sanitize_convoys()
+    local list, clean, max_id = F.state.convoys, {}, 0
+    for _, c in ipairs(type(list) == "table" and list or {}) do
+        local n = F.convoy_sound(c)
+        if n then clean[#clean + 1] = c; max_id = math.max(max_id, n) end
+    end
+    F.state.convoys = type(list) == "table" and clean or nil
+    F.state.convoy_seq = math.max(max_id, F.stock_number(F.state.convoy_seq) and F.state.convoy_seq or 0)
+end
+
+-- ---- stepping, arrival, seizure, return (spec 2026-10-23, section 5.2) -----------------------
+-- A convoy comes off the list FIRST in the three that move its goods, as F.arrive and F.seize do: a throw part-way
+-- through the moves leaves the goods already moved, never a convoy that moves them again next turn. True only when
+-- this call took it off, so a record already gone (delivered, seized, returned) moves nothing a second time.
+function F.convoy_drop(c)
+    local list = F.convoys()
+    for i, x in ipairs(list) do
+        if x == c then table.remove(list, i) return true end
+    end
+    return false
+end
+
+-- ARRIVED: into the buyer's capital AS IT STANDS NOW, as far as it has room; what does not fit is lost by the rule
+-- F.move keeps. F.convoys_turn has just seen that the buyer lives and has a capital.
+function F.convoy_arrive(c)
+    if not F.convoy_drop(c) then return end
+    local buyer = F.live(c.buyer)
+    local to = F.capital(buyer)
+    for stem, n in pairs(c.basket) do F.move(nil, to, stem, n, KIND.trade, nil, c.buyer) end
+end
+
+-- SEIZED: the basket goes to the captor's settlement nearest the convoy; a captor with none destroys it. The exporter
+-- gets no line of its own, as for a seized shipment: its loss was booked as traded out at dispatch.
+function F.convoy_seize(c, captor)
+    if not F.convoy_drop(c) then return end
+    for stem, n in pairs(c.basket) do F.move(nil, F.nearest(captor, c.x, c.y), stem, n, KIND.raid, nil, captor:name()) end
+end
+
+-- RETURNED: back to the exporter's settlement nearest the convoy, or its capital when the convoy has no position;
+-- an exporter with no settlement loses it.
+function F.convoy_return(c)
+    if not F.convoy_drop(c) then return end
+    local exporter, to = F.live(c.f), nil
+    if exporter and c.x then to = F.nearest(exporter, c.x, c.y) elseif exporter then to = F.capital(exporter) end
+    for stem, n in pairs(c.basket) do F.move(nil, to, stem, n, KIND.move, nil, c.f) end
+end
+
+-- ON THE ROAD: the point a share of the way along it, as F.ship_step reads a shipment's. No road, no move.
+function F.convoy_step(c, turn)
+    local road = F.unpack_road(c.road)
+    if not road then return end
+    local elapsed, duration = math.max(0, turn - c.at), math.max(1, c.due - c.at)
+    local i = math.min(#road, math.floor((#road - 1) * elapsed / duration) + 1)
+    c.x, c.y = road[i][1], road[i][2]
+end
+
+-- At its exporter's turn start, before its shipments: each convoy is returned, seized, arrives or moves on. A COPY of
+-- the list is walked, since every one of them takes the convoy off it; the list is in id order.
+function F.convoys_turn(faction)
+    local fkey, turn, mine = faction:name(), cm:model():turn_number(), {}
+    for _, c in ipairs(F.convoys()) do
+        if c.f == fkey then mine[#mine + 1] = c end
+    end
+    for _, c in ipairs(mine) do
+        local buyer = F.live(c.buyer)
+        -- the treaty gone (war included), the buyer dead, or the buyer with no settlement left to receive it
+        if not buyer or not F.capital(buyer) or not F.partners(faction, buyer) then F.convoy_return(c)
+        else
+            -- a convoy with no position has no army near it
+            local captor = c.x and c.y and F.captor(faction, c)
+            if captor then F.convoy_seize(c, captor)
+            elseif turn >= c.due then F.convoy_arrive(c)
+            -- still on the road: it follows the buyer's capital, which F.ships_to counts the cargo at
+            else c.to = F.capital(buyer):name(); F.convoy_step(c, turn) end
+        end
+    end
+end
+
 -- A dead faction's turn never starts: its shipments are cleared at a player's.
 function F.sweep()
     local list = F.ships()
@@ -3416,6 +3771,11 @@ function F.sweep()
         elseif list[i].sender and not F.live(list[i].sender) then
             F.route_return(list[i])
         end
+    end
+    -- a convoy whose exporter is gone has nobody to return to: it goes, basket and all
+    local convoys = F.convoys()
+    for i = #convoys, 1, -1 do
+        if not F.live(convoys[i].f) then table.remove(convoys, i) end
     end
     -- the Workshop: a dead buyer's upgrades go with it
     for _, ups in pairs(F.state.upgrades or {}) do
@@ -3673,6 +4033,7 @@ function F.on_faction_turn_start(faction)
         F.guard(F.fight_stale, cm:model():turn_number())
     end
     -- Arrivals fund this turn; essentials and elective local orders precede exports.
+    F.guard(F.convoys_turn, faction)
     F.guard(F.ships_turn, faction)
     F.guard(F.upkeep, faction)
     F.guard(F.provisions_turn, faction)
@@ -3680,7 +4041,8 @@ function F.on_faction_turn_start(faction)
     F.guard(F.supply, faction)
     F.guard(F.economy_turn, faction)
     F.guard(F.routes_turn, faction)
-    F.trade(faction)
+    -- guarded: the trade debits through F.route_goods, which can throw, and the duty after it must still run
+    F.guard(F.trade, faction)
     F.guard(F.duty, faction)
     -- last, on what eating and trading left; its own guard, as an offer is model state too
     F.guard(F.events, faction)
@@ -3769,6 +4131,8 @@ first("loading", function(context)
     for id in pairs(F.state.armies or {}) do F.state.army_issued[id]=true end
     F.sanitize_stock()
     F.sanitize_routes()
+    F.sanitize_ships()
+    F.sanitize_convoys()
 end)
 
 first("saving", function(context)

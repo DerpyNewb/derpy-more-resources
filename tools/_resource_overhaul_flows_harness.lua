@@ -73,7 +73,7 @@ local function region(key, x, y, cap, held)
                 resource = function(_, k)
                     r.pool_reads = (r.pool_reads or 0) + 1
                     local stem = string.match(k, "^derpy_mr_store_(.+)$")
-                    if not r.readable or not stem then return NULL end
+                    if not r.readable or not stem or (r.absent or {})[stem] then return NULL end
                     return pool(r, stem)
                 end,
                 resources = function()
@@ -81,7 +81,7 @@ local function region(key, x, y, cap, held)
                     local items = {}
                     if r.readable then
                         for _, g in ipairs(DERPY_MR_FLOWS_GOODS or {}) do
-                            if not r.missing_pools then items[#items + 1] = pool(r, g.stem) end
+                            if not r.missing_pools and not (r.absent or {})[g.stem] then items[#items + 1] = pool(r, g.stem) end
                         end
                     end
                     return list(items)
@@ -238,6 +238,7 @@ cm = {
     -- CA's docs say positive only; CA's own scripts pass negatives (import duty, spec section 2)
     treasury_mod = function(_, fk, n)
         if n == 0 then error("treasury_mod of nothing") end
+        assert(n == math.floor(n), "treasury_mod of a fraction")
         TREASURY[fk] = (TREASURY[fk] or 0) + n
     end,
     faction_add_pooled_resource = function(_, fk, pool, factor, n)
@@ -501,6 +502,28 @@ decide("occupation_decision_raze_without_occupy", a1, hum, "ai1")
 eq(h1.held.coal, 50, "a reading from an earlier turn is not used"); ERRORS = {}
 TURN = TURN - 1; a1.readable = true
 
+-- ---- agreement cargo helpers (spec 2026-10-23): an agreement's goods leave as a convoy and land later ----
+-- Cargo on the road to `buyer` (a faction key): the `stem` in every convoy's basket.
+function cargo_to(buyer, stem)
+    local n = 0
+    for _, c in ipairs(F.convoys()) do
+        if c.buyer == buyer then n = n + (c.basket[stem] or 0) end
+    end
+    return n
+end
+-- The exporter's next turn, convoys only (no trade, so nothing new leaves): what an agreement's cargo on a one-turn road
+-- lands as. TURN moves on and stays there; a case that sets TURN itself goes on from that.
+function advance_convoys(exporter)
+    TURN = TURN + 1
+    F.convoys_turn(exporter.iface)
+end
+-- road_82: 82 points, 81 steps, (0,0) to (81,0), three turns at 40 steps a turn. The later cargo cases reuse it.
+function road_82()
+    local path = {}
+    for x = 0, 81 do path[#path + 1] = { x, 0 } end
+    return path
+end
+
 -- ---- trade targets ----------------------------------------------------------------------
 local function turn_start(f) fire("FactionTurnStart", { faction = function() return f.iface end }) end
 local tA = faction("tA", { human = true })
@@ -515,19 +538,22 @@ F.set_stock_policy("tB", "coal", "target", "25")
 F.set_stock_policy("tA", "iron", "target", "30")
 F.trade(tA.iface)
 eq(tA2.held.coal, 285, "fullest removable store exports 5%")
-eq(tB1.held.coal, 16, "nonzero capital stock still receives")
+eq(cargo_to("tB", "coal"), 15, "nonzero capital stock still receives: a convoy carries it")
+eq(tB1.held.coal, 1, "and nothing lands the turn it leaves")
+advance_convoys(tA); eq(tB1.held.coal, 16, "it lands on its due turn")
 F.trade(tA.iface)
-eq(tB1.held.coal, 25, "next export stops at target")
+eq(cargo_to("tB", "coal"), 9, "next export stops at target")
+advance_convoys(tA); eq(tB1.held.coal, 25, "and the target is met")
 local c2 = tA2.held.coal
 F.trade(tA.iface); eq(tA2.held.coal, c2, "target reached: no more exports")
 F.set_stock_policy("tB", "coal", "target", "0")
 tB1.held.coal = 0; F.trade(tA.iface)
-eq(tB1.held.coal, 0, "zero refuses scripted requests")
-F.trade(tB.iface); eq(tA1.held.iron, 10, "reverse direction has its own target")
+eq(cargo_to("tB", "coal"), 0, "zero refuses scripted requests")
+F.trade(tB.iface); eq(cargo_to("tA", "iron"), 10, "reverse direction has its own target")
 F.set_stock_policy("tA", "coal", "keep", "290")
 F.set_stock_policy("tB", "coal", "target", "100")
 F.trade(tA.iface)
-eq(tB1.held.coal, 0, "both sources below manual Keep")
+eq(cargo_to("tB", "coal"), 0, "both sources below manual Keep")
 F.set_stock_policy("tA", "coal", "keep", "90")
 tA2.held.coal, tA1.held.coal = 80, 140
 F.trade(tA.iface)
@@ -540,9 +566,85 @@ local real_read = DERPY_MR_STORES.read_realm
 DERPY_MR_STORES.read_realm = function() error("a UI-side read threw") end
 turn_start(hum)
 DERPY_MR_STORES.read_realm = real_read
-eq(tB1.held.salt, 5, "exports survive snapshot failure")
+eq(cargo_to("tB", "salt"), 5, "exports survive snapshot failure")
+advance_convoys(hum)
 eq(#ERRORS, 1, "snapshot failure logged"); ERRORS = {}
 hum.partners = {}; tA.partners = {}; tB.partners = {}
+do
+    -- PRICE GRADIENT: an agreement moves goods only to a store whose price clears the source's price plus the spread
+    local rates = F.state.rates; local upkeep_was = rates.upkeep; rates.upkeep = false   -- the fullness branch
+    local gS = faction("gradS", { human = true }); local gS1 = region("gradS1", 8000, 0, 200, { coal = 160 }); own(gS, gS1, true)
+    local gD = faction("gradD", { human = true }); local gD1 = region("gradD1", 8100, 0, 200, { coal = 20 }); own(gD, gD1, true)
+    gS.partners, gD.partners = { gD }, { gS }
+    F.set_stock_policy("gradD", "coal", "target", "200")
+    local function price(f, r) return F.local_price(F.stock_view(f.iface, r.iface), "coal", f.name) end
+    eq(price(gS, gS1), 165, "160 of 200: cheap"); eq(F.buy_price(165), 181, "and 181 to buy")
+    eq(price(gD, gD1), 480, "20 of 200: dear")
+    eq((F.trade(gS.iface, true).gradD or {})[1], "coal", "the preview shows the cargo going uphill")
+    F.trade(gS.iface); eq(cargo_to("gradD", "coal"), 8, "uphill: 5% of 160 is sent"); eq(gS1.held.coal, 152, "and leaves the source")
+    advance_convoys(gS)
+    gS1.held.coal, gD1.held.coal = 110, 90
+    eq(price(gS, gS1), 276, "110 of 200: 276"); eq(F.buy_price(276), 303, "and 303 to buy"); eq(price(gD, gD1), 321, "90 of 200: 321")
+    F.trade(gS.iface); eq(cargo_to("gradD", "coal"), 5, "a small gap still clears the spread"); eq(gS1.held.coal, 105, "and the source gives")
+    advance_convoys(gS)
+    gS1.held.coal, gD1.held.coal = 100, 100
+    eq(F.import_need(F.stock_view(gD.iface, gD1.iface), "coal") > 0, true, "though the target still wants more")
+    F.trade(gS.iface); eq(cargo_to("gradD", "coal"), 0, "two comfortable stores trade nothing"); eq(gS1.held.coal, 100, "the source keeps its own")
+    eq(F.trade(gS.iface, true).gradD, nil, "the preview shows no cargo either")
+    -- the boundary: a destination price exactly the source's buy price still takes goods
+    gS1.held.coal, gD1.held.coal = 100, 86
+    eq(price(gD, gD1), F.buy_price(price(gS, gS1)), "86 of 200 sells at exactly 330, the source's buy price")
+    F.trade(gS.iface); eq(cargo_to("gradD", "coal"), 5, "an equal price moves goods"); eq(gS1.held.coal, 95, "5% of 100 left the source")
+    advance_convoys(gS)
+    gS1.held.coal, gD1.held.coal = 20, 160
+    F.trade(gS.iface); eq(cargo_to("gradD", "coal"), 0, "goods never move downhill"); eq(gS1.held.coal, 20, "whatever the target says")
+    eq(F.trade(gS.iface, true).gradD, nil, "and the preview agrees")
+    -- each store is priced for its own faction: the Exchange prices gradS's coal at 1 gold and gradD's at 9
+    local ex_was = EX
+    EX = { lot = function() return 1 end, subject = nil,
+           with_player = function(f, fn) EX.subject = f; local ok = pcall(fn); EX.subject = nil; return ok end,
+           sell_price = function() return EX.subject == "gradS" and 1 or 9 end }
+    gS1.held.coal, gD1.held.coal = 160, 20
+    eq(price(gS, gS1), 55, "gradS's store at its own 1 gold"); eq(price(gD, gD1), 1440, "gradD's at its own 9 gold")
+    eq((F.trade(gS.iface, true).gradD or {})[1], "coal", "the preview prices each side for its own faction")
+    F.trade(gS.iface); eq(cargo_to("gradD", "coal"), 8, "so the dear store takes from the cheap one"); eq(gS1.held.coal, 152, "and the cheap one gave")
+    advance_convoys(gS)
+    EX = ex_was
+    -- before the first turn start the rates are not frozen: the same rule runs on the defaults
+    F.state.rates = nil
+    local gU = faction("gradU", { human = true }); local gU1 = region("gradU1", 8200, 0, 200, { coal = 160 }); own(gU, gU1, true)
+    local gV = faction("gradV", { human = true }); local gV1 = region("gradV1", 8300, 0, 200, {}); own(gV, gV1, true)
+    gU.partners, gV.partners = { gV }, { gU }
+    F.set_stock_policy("gradV", "coal", "target", "200")
+    F.trade(gU.iface); eq(cargo_to("gradV", "coal") > 0, true, "an empty partner draws goods before the rates are frozen")
+    gS.partners, gD.partners, gU.partners, gV.partners = {}, {}, {}, {}
+    F.state.rates = rates; rates.upkeep = upkeep_was
+end
+do
+    -- AN AGREEMENT SELLS FROM THE EXPORTER'S CHEAPEST STORE: a full small store feeds a short partner while the
+    -- big capital sits at half (3.30 to buy, dearer than the partner's 3.21) and would be refused by the price gate
+    local rates = F.state.rates; local upkeep_was = rates.upkeep; rates.upkeep = false
+    local cX = faction("cheapX", { human = true })
+    local cX1 = region("cheapX1", 8400, 0, 1000, { coal = 500 }); own(cX, cX1, true)
+    local cX2 = region("cheapX2", 8450, 0, 200, { coal = 200 }); own(cX, cX2)
+    local cY = faction("cheapY", { human = true }); local cY1 = region("cheapY1", 8500, 0, 1000, { coal = 450 }); own(cY, cY1, true)
+    cX.partners, cY.partners = { cY }, { cX }
+    F.set_stock_policy("cheapY", "coal", "target", "1000")
+    local function price(f, r) return F.local_price(F.stock_view(f.iface, r.iface), "coal", f.name) end
+    eq(F.buy_price(price(cX, cX1)), 330, "the capital at 500 of 1,000 costs 3.30 to buy"); eq(F.buy_price(price(cX, cX2)), 82, "the full minor 0.82")
+    eq(price(cY, cY1), 321, "the partner's capital at 450 of 1,000 is worth 3.21")
+    eq(F.import_need(F.stock_view(cY.iface, cY1.iface), "coal") > 0, true, "and it still wants more")
+    eq((F.trade(cX.iface, true).cheapY or {})[1], "coal", "the preview names the good")
+    F.trade(cX.iface)
+    eq(cX2.held.coal, 190, "the minor gave 5% of its 200"); eq(cX1.held.coal, 500, "the capital kept its stock")
+    eq(cargo_to("cheapY", "coal"), 10, "and its convoy carries the 5% to the partner")
+    eq(cY1.held.coal, 450, "nothing has landed yet")
+    local cX3 = region("cheapX3", 8460, 0, 400, { coal = 380 }); own(cX, cX3)
+    eq(F.price_mult(F.stock_view(cX.iface, cX3.iface), "coal"), F.price_mult(F.stock_view(cX.iface, cX2.iface), "coal"), "190 of 200 and 380 of 400 price alike")
+    eq(F.cheapest_store(F.stock_views(cX.iface), "coal").region:name(), "cheapX3", "on a tie the store with more to spare gives")
+    cX.partners, cY.partners = {}, {}
+    rates.upkeep = upkeep_was
+end
 
 -- ---- the player's trade switches (the Stores panel's Trade tab) ------------------------
 local tP = faction("tP", { human = true })
@@ -553,12 +655,12 @@ F.state.rates.upkeep = true
 F.set_stock_policy("tP", "iron", "target", "100")
 F.set_stock_policy("tP", "coal", "keep", "0")
 F.toggle("tP", "export", "coal"); eq(F.stopped("tP", "export", "coal"), true, "a click stops a good's exports")
-F.trade(tP.iface); eq(tP1.held.coal, 100, "a stopped export stays home"); eq(tQ1.held.coal, nil, "and never arrives")
+F.trade(tP.iface); eq(tP1.held.coal, 100, "a stopped export stays home"); eq(cargo_to("tQ", "coal"), 0, "and no convoy carries it")
 F.toggle("tP", "export", "coal"); eq(F.stopped("tP", "export", "coal"), false, "a second click allows it again")
 F.trade(tP.iface); eq(tP1.held.coal, 100, "an allowed export still needs partner demand")
 F.toggle("tP", "import", "iron")
-F.trade(tQ.iface); eq(tP1.held.iron, nil, "a refused import is not sent"); eq(tQ1.held.iron, 250, "and the partner keeps it")
-F.toggle("tP", "import", "iron"); F.trade(tQ.iface); eq(tP1.held.iron, 5, "an accepted import arrives")
+F.trade(tQ.iface); eq(cargo_to("tP", "iron"), 0, "a refused import is not sent"); eq(tQ1.held.iron, 250, "and the partner keeps it")
+F.toggle("tP", "import", "iron"); F.trade(tQ.iface); eq(cargo_to("tP", "iron"), 5, "an accepted import is sent")
 F.toggle("tQ", "export", "iron"); eq(F.stopped("tQ", "export", "iron"), false, "a computer-run faction has no switches")
 F.toggle("tP", "sideways", "coal"); eq(F.stopped("tP", "sideways", "coal"), false, "an unknown direction is ignored")
 F.toggle("tP", "export", "no_such_good"); eq(F.stopped("tP", "export", "no_such_good"), false, "an unknown good is ignored")
@@ -666,7 +768,7 @@ do
         return open, why
     end }
     local t0 = TURN; TURN = 900
-    F.trade(rA.iface); eq(rB1.held.coal, 1, "a partner out of reach gets no resources")
+    F.trade(rA.iface); eq(cargo_to("rB", "coal"), 0, "a partner out of reach gets no resources")
     eq(table.concat(asked, " "), "rA1>rB1@" .. F.rates().reach * 40, "asked capital to capital, the reach in hexes")
     eq(F.rates().reach, 6, "six turns unless the settings say otherwise")
     F.trade(rB.iface); F.trade(rA.iface); eq(#asked, 1, "one answer per pair per turn, whichever side asks")
@@ -678,7 +780,7 @@ do
     local st, said = F.route_status(rA.iface, { seller = "rB", from = "rB2", to = "rA1", stem = "coal" })
     eq(st == nil and said, "Cut off by enemy lands", "a partner contract between two settlements is judged on its own road")
     open, why = true, nil; TURN = 901
-    F.trade(rA.iface); eq(rB1.held.coal, 16, "back in reach, the same trade runs")
+    F.trade(rA.iface); eq(cargo_to("rB", "coal"), 15, "back in reach, the same trade runs")
     eq(#asked, 3, "and a new turn asks again")   -- the capitals twice, and the contract's own pair once
     F.made_cache = nil; a0 = TREASURY.rA or 0; F.duty(rA.iface)
     eq((TREASURY.rA or 0) - a0 < 0, true, "and duty is paid again"); eq(#F.cut_off(rA.iface), 0, "nobody listed")
@@ -769,6 +871,8 @@ eq(#bk.turns, 20, "twenty turns kept"); eq(bk.turns[1], 106, "the oldest dropped
 eq(#bk.total.coal, 20, "the series trimmed with them"); eq(bk.total.coal[20], 25, "newest last")
 eq(F.state.factions.tC, nil, "no history for a computer-run faction")
 
+-- the six convoys the trade cases above left on the road: none of what follows is about them
+F.state.convoys = {}
 -- ---- save and load ----------------------------------------------------------------------
 eq(cm.saving_game_callbacks[2], thrower, "our save callback went in ahead of another mod's")
 eq(cm.loading_game_callbacks[2], thrower, "and so did our load callback")
@@ -792,6 +896,100 @@ eq(F.stopped("tP", "import", "salt"), true, "and so do the trade switches")
 SAVED = {}
 cm.loading_game_callbacks[1]({})
 eq(next(F.state.factions), nil, "an old save starts an empty history"); eq(#ERRORS, 0, "without an error")
+
+-- ---- saved convoys: the load keeps the well-formed ones (agreement cargo, Task 4) ----------------------
+-- Its own block with its own F.state: every case goes through the real save callback and the real load
+-- callback, and the global it changes (F.state, SAVED) is put back at the end.
+;(function()
+    local state, saved = F.state, SAVED
+    local P, NONE = F.CONVOY_PREFIX, {}
+    -- a good convoy; over = { field = value }, NONE takes the field out
+    local function cv(n, over)
+        local c = { id = P .. n, f = "svE", buyer = "svB", from = "svE1", to = "svB1", basket = { coal = 5 },
+                    at = 10, due = 12, road = "0:0;1:0;2:0", x = 0, y = 0 }
+        for k, v in pairs(over or {}) do if v == NONE then c[k] = nil else c[k] = v end end
+        return c
+    end
+    -- save a state holding these convoys, forget it, load it; the convoy list the load leaves
+    local function reload(convoys, seq)
+        F.state = { factions = {}, convoys = convoys, convoy_seq = seq }
+        SAVED = {}; cm.saving_game_callbacks[1]({})
+        F.state = {}; cm.loading_game_callbacks[1]({})
+        return F.convoys()
+    end
+
+    -- THE BRIEF: one good, one with no due, one with a negative amount; the sequence is not pulled down by the ones that went
+    local list = reload({ cv(3), cv(4, { due = NONE }), cv(5, { basket = { coal = -3 } }) }, 5)
+    whole(SAVED.derpy_mr_flows, "state")
+    eq(#list, 1, "malformed convoys dropped"); eq(list[1].id, P .. "3", "the good one is the one kept")
+    eq(list[1].basket.coal, 5, "with its basket"); eq(list[1].road, "0:0;1:0;2:0", "and its road")
+    eq(F.state.convoy_seq, 5, "a saved sequence above the kept ids stays: a delivered convoy's number is not reused")
+    -- the sequence otherwise follows the kept ones
+    reload({ cv(3) }, nil); eq(F.state.convoy_seq, 3, "no saved sequence: the sequence continues from the kept id")
+    reload({ cv(3) }, 1); eq(F.state.convoy_seq, 3, "a saved sequence below a kept id is raised to it")
+    reload({ cv(3) }, 2.5); eq(F.state.convoy_seq, 3, "a fraction is no sequence")
+    reload({ cv(3) }, "9"); eq(F.state.convoy_seq, 3, "nor is a string")
+    -- a save from before convoys, or one whose list is no list
+    eq(reload(nil, nil)[1], nil, "old save: empty list"); eq(#F.convoys(), 0, "old save: empty list, counted")
+    eq(F.state.convoys, nil, "and loading made no list")
+    reload(nil, 7); eq(F.state.convoy_seq, 7, "a saved sequence with no list is kept")
+    eq(#reload("junk", nil), 0, "a list that is no list: nothing on the road"); eq(F.state.convoys, nil, "and none made")
+    list = reload({ 7, "x", true, cv(1), cv(2) }, nil)
+    eq(#list, 2, "entries that are no tables are dropped"); eq(list[1].id, P .. "1", "the convoys among them are kept"); eq(list[2].id, P .. "2", "in order")
+    eq(#reload({ cv(1, { due = NONE }) }, nil), 0, "an existing list that loses every record loads empty")
+
+    -- ONE RULE AT A TIME: the bad one sits between two good ones, so a load that stopped at it or dropped all of them fails too
+    local drops = {
+        { "id from another prefix", { id = "cv_3" } }, { "id of no digits", { id = P } },
+        { "id with a tail", { id = P .. "3x" } }, { "id with a head", { id = "x" .. P .. "3" } },
+        { "id that is a number", { id = 3 } }, { "id past the whole-number limit", { id = P .. "99999999999" } },
+        { "no id", { id = NONE } },
+        { "exporter not a string", { f = 5 } }, { "buyer missing", { buyer = NONE } },
+        { "from not a string", { from = {} } }, { "to not a string", { to = false } },
+        { "no basket", { basket = NONE } }, { "basket a string", { basket = "coal" } }, { "empty basket", { basket = {} } },
+        { "amount zero", { basket = { coal = 0 } } }, { "amount negative", { basket = { coal = -3 } } },
+        { "amount a fraction", { basket = { coal = 2.5 } } }, { "amount a string", { basket = { coal = "5" } } },
+        { "amount past the limit", { basket = { coal = 2000000 } } },
+        { "a good that does not exist", { basket = { nothing_here = 3 } } },
+        { "one bad good among good ones", { basket = { coal = 5, nothing_here = 3 } } },
+        { "no turn it left", { at = NONE } }, { "turn it left a fraction", { at = 1.5 } },
+        { "no due", { due = NONE } }, { "due a string", { due = "12" } }, { "due a fraction", { due = 12.5 } },
+        { "due before it left", { due = 9 } },
+        { "x a fraction", { x = 1.5 } }, { "y a string", { y = "0" } },
+        { "x without y", { y = NONE } }, { "y without x", { x = NONE } },
+        { "road a number", { road = 5 } }, { "road of no points", { road = "" } }, { "road that is not one", { road = "nothing" } },
+    }
+    for _, d in ipairs(drops) do
+        list = reload({ cv(1), cv(3, d[2]), cv(2) }, nil)
+        eq(#list, 2, "dropped: " .. d[1]); eq(list[1].id, P .. "1", "the one before it is kept: " .. d[1])
+        eq(list[2].id, P .. "2", "and the one after it: " .. d[1])
+        eq(F.state.convoy_seq, 2, "a dropped record does not move the sequence: " .. d[1])
+    end
+    -- the edges of those rules that stay in
+    local keeps = {
+        { "due the turn it left", { due = 10 } }, { "no road", { road = NONE } },
+        { "a road and no position", { x = NONE, y = NONE } }, { "no road and no position", { road = NONE, x = NONE, y = NONE } },
+        { "several goods", { basket = { coal = 5, iron = 2 } } },
+    }
+    for _, k in ipairs(keeps) do
+        list = reload({ cv(1), cv(3, k[2]), cv(2) }, nil)
+        eq(#list, 3, "kept: " .. k[1]); eq(F.state.convoy_seq, 3, "and its number counts: " .. k[1])
+    end
+
+    -- WHAT A KEPT CONVOY IS FOR: the next convoy takes the next number, and a record with no due never reaches F.ship_due
+    local e, b = faction("svE", { human = true }), faction("svB", { human = true })
+    local er, br = region("svE1", 0, 0, 600, {}), region("svB1", 5, 0, 600, {})
+    own(e, er, true); own(b, br, true)
+    reload({ cv(3) }, nil)
+    eq(F.incoming("svB", "svB1", "coal"), 5, "a convoy that survived the load counts as incoming")
+    eq(F.stock_view(b.iface, br.iface).due[1].due, 12, "with its arrival turn in the buyer's store view")
+    eq(F.convoy_new(e.iface, b.iface, { coal = 1 }).id, P .. "4", "and the next convoy is numbered after it")
+    reload({ cv(3, { due = NONE }) }, nil)
+    eq(F.incoming("svB", "svB1"), 0, "a convoy with no due is not on the road")
+    eq(#F.stock_view(b.iface, br.iface).due, 0, "and its store view reads no arrival turn from it")
+    eq(#ERRORS, 0, "no script errors loading convoys: " .. table.concat(ERRORS, "; "))
+    F.state, SAVED = state, saved
+end)()
 
 -- ---- rates: MCT, frozen, multiplayer ----------------------------------------------------
 local MCT = {}
@@ -1062,13 +1260,29 @@ local l2 = region("l2", 8100, 0, 200, { coal = 20 }); own(lP, l2)
 eq(F.sale(lP.iface, "coal"), nil, "200 held in 400 space: exactly half, nothing to sell")
 l1.held.coal = 190
 local sale = F.sale(lP.iface, "coal")
-eq(sale.n, 10, "10 above half"); eq(sale.price, 3, "war materials at 3 gold without the Exchange")
-eq(sale.gold, 30, "30 gold")
+eq(sale.n, 10, "10 above half")
+eq(sale.price, 87, "l1 at 190 of 200 sells at 0.87 a unit (war 3 gold, mult 32, less the spread), hundredths")
+eq(sale.gold, 8, "10 units at l1's own sell price 0.87, floored")
+eq(#sale.lots, 1, "one lot"); eq(sale.lots[1].region, "l1", "which store"); eq(sale.lots[1].n, 10, "how many from it")
+eq(F.quote(lP.iface, sale.lots[1].from, "coal").sell, sale.lots[1].price, "the price the panel shows a seller is the lot's price")
 F.request("lP", "sell", "coal")
 eq(l1.held.coal, 180, "taken from the fullest store"); eq(l2.held.coal, 20, "not the other")
-eq(TREASURY.lP, 30, "and paid"); eq(F.book("lP").now.coal.sold_out, 10, "booked as sold")
-F.request("lP", "sell", "coal"); eq(TREASURY.lP, 30, "nothing left to sell, nothing paid")
-l1.held.coal = 190
+eq(TREASURY.lP, 8, "and paid the floored lot"); eq(F.book("lP").now.coal.sold_out, 10, "booked as sold")
+F.request("lP", "sell", "coal"); eq(TREASURY.lP, 8, "nothing left to sell, nothing paid")
+-- Two lots: the fuller store first, each at its own price; a Keep applies to every store
+l1.held.coal = 200; l2.held.coal = 160; F.set_stock_policy("lP", "coal", "keep", 50)
+sale = F.sale(lP.iface, "coal")
+eq(sale.n, 160, "160 above half of 400, stock above Keep 150 + 110")
+eq(#sale.lots, 2, "two lots"); eq(sale.lots[1].region, "l1", "the store with more to give first")
+eq(sale.lots[1].n, 150, "all it can give above Keep"); eq(sale.lots[1].price, 68, "full store: mult 25, sell 0.68")
+eq(sale.lots[2].region, "l2", "then the other"); eq(sale.lots[2].n, 10, "the rest"); eq(sale.lots[2].price, 150, "at 160 of 200: mult 55, sell 1.50")
+eq(sale.gold, 102 + 15, "floor(150 * 0.68) + floor(10 * 1.50)")
+eq(sale.price, 73, "weighted average of the lots' prices, hundredths")
+F.request("lP", "sell", "coal")
+eq(l1.held.coal, 50, "l1 down to Keep"); eq(l2.held.coal, 150, "l2 gave its 10")
+eq(TREASURY.lP, 8 + 117, "paid the sum of the lots")
+F.set_stock_policy("lP", "coal", "keep", "auto")
+l1.held.coal = 190; l2.held.coal = 20
 -- THE EXCHANGE AS IT IS: sell_price is a LOT's price (EX.lot units), and it reads the houses' stance
 -- toward EX.who() - the local player unless EX.with_player binds another (zzz_derpy_chd_exchange.lua)
 do
@@ -1085,18 +1299,84 @@ local function ex_stub(price_for)
 end
 EX = ex_stub(function(res, who) eq(res, "res_derpy_coal", "asked by resource key"); return who == "lP" and 510 or 99999 end)
 local xs = F.sale(lP.iface, "coal")
-eq(xs.price, 51, "a lot of 10 at 510 is 51 a unit, not 510 (paid 10x before)")
-eq(xs.gold, 510, "the Exchange's price for the SELLER, whoever's machine runs it")
+eq(xs.price, 1483, "a lot of 10 at 510 is 51 a unit, l1 (mult 32) sells at 16.32 less the spread")
+eq(xs.gold, 148, "the Exchange's price for the SELLER, whoever's machine runs it, floored")
 EX = ex_stub(function() error("the Exchange broke") end)
-eq(F.sale(lP.iface, "coal").price, 3, "the fixed rate when it errors")
-EX = ex_stub(function() return 0 end); eq(F.sale(lP.iface, "coal").price, 3, "or prices at nothing")
+eq(F.sale(lP.iface, "coal").price, 87, "the store's own price on the fixed rate when the Exchange errors")
+EX = ex_stub(function() return 0 end); eq(F.sale(lP.iface, "coal").price, 87, "or prices at nothing")
 EX = nil
 end
+-- A store with no price (no room in its pool) gives no lot and is not drawn, though its stock counts
+do
+local uP = faction("uP", { human = true })
+local u0 = region("u0", 8200, 0, 0, { coal = 300 }); own(uP, u0, true)
+local u1 = region("u1", 8300, 0, 400, { coal = 100 }); own(uP, u1)
+local us = F.sale(uP.iface, "coal")
+eq(#us.lots, 1, "only the store with a price is a lot"); eq(us.lots[1].region, "u1", "the priced one, though the other holds more")
+eq(us.n, 100, "all u1 has, short of the 200 the realm is over half by")
+eq(us.price, 373, "u1 at 100 of 400: mult 137, price 4.11, sell 3.73"); eq(us.gold, 373, "paid for its lot only")
+F.sell(uP.iface, "coal")
+eq(u0.held.coal, 300, "the unpriced store is not drawn"); eq(u1.held.coal, 0, "the priced one is")
+eq(TREASURY.uP, 373, "and paid")
+end
+-- A lot that would pay nothing once floored is not a lot: its unit stays in the store
+do
+local zP = faction("zP", { human = true })
+local z1 = region("zs1", 8400, 0, 200, { coal = 200 }); own(zP, z1, true)
+local z2 = region("zs2", 8500, 0, 200, { coal = 191 }); own(zP, z2)
+F.set_stock_policy("zP", "coal", "keep", 190)
+local zs = F.sale(zP.iface, "coal")
+eq(zs.n, 10, "z2's unit is above Keep but sells at 0.84 and floors to 0 gold: not counted")
+eq(#zs.lots, 1, "one lot"); eq(zs.lots[1].region, "zs1", "the full store"); eq(zs.gold, 6, "floor(10 * 0.68)")
+F.request("zP", "sell", "coal")
+eq(z1.held.coal, 190, "z1 down to Keep"); eq(z2.held.coal, 191, "z2 keeps its unit"); eq(TREASURY.zP, 6, "paid for the one lot")
+end
+
+-- ---- local prices ----
+do
+local upkeep_was = F.state.rates.upkeep
+F.state.rates.upkeep = true
+local pP = faction("pP", { human = true })
+local p1 = region("p1", 9000, 0, 200, { coal = 0, grain = 0 }); own(pP, p1, true); p1.level = 1; p1.absent = { silk = true }
+local v = F.stock_view(pP.iface, p1.iface)
+eq(v.capacity.silk, nil, "an absent pool has no capacity")
+eq(F.price_mult(v, "grain"), 175, "no cover: 175")                 -- eats 2 a turn, holds 0
+p1.held.grain = 20; v = F.stock_view(pP.iface, p1.iface)
+eq(F.price_mult(v, "grain"), 100, "ten turns of cover: 100")
+p1.held.grain = 40; v = F.stock_view(pP.iface, p1.iface)
+eq(F.price_mult(v, "grain"), 25, "twenty turns: 25, and never below")
+p1.held.grain = 30; v = F.stock_view(pP.iface, p1.iface)
+eq(F.price_mult(v, "grain"), 62, "fifteen turns: 100 + floor(75 * -50 / 100), rounded down")
+p1.held.grain = 10; v = F.stock_view(pP.iface, p1.iface)
+eq(F.price_mult(v, "grain"), 137, "five turns: 100 + floor(75 * 50 / 100)")
+p1.held.salt = 10; v = F.stock_view(pP.iface, p1.iface)
+eq(F.price_mult(v, "grain"), 100, "cover counts the whole category, salt too"); p1.held.salt = 0
+v = F.stock_view(pP.iface, p1.iface)
+eq(F.price_mult(v, "coal"), 175, "a good not eaten here: fullness, empty is 175")
+p1.held.coal = 100; v = F.stock_view(pP.iface, p1.iface); eq(F.price_mult(v, "coal"), 100, "half full: 100")
+p1.held.coal = 200; v = F.stock_view(pP.iface, p1.iface); eq(F.price_mult(v, "coal"), 25, "full: 25")
+eq(F.price_mult(v, "silk"), nil, "no pool here: no price")
+eq(F.local_price(v, "coal", "pP"), 75, "war materials at 300 hundredths times 25%")
+eq(F.buy_price(75), 82, "buyer pays 110%, floored"); eq(F.sell_price(75), 68, "seller gets 100/110")
+eq(F.gold(10, 75), 7, "ten units at 0.75 is 7 gold")
+local q = F.quote(pP.iface, p1.iface, "grain")
+eq(q.mult, 137, "quote carries the multiplier"); eq(q.cover, 5, "and the cover in turns"); eq(q.base, 100, "and the base in hundredths")
+eq(F.quote(pP.iface, p1.iface, "silk"), nil, "no pool, no quote")
+p1.held.grain = 100; v = F.stock_view(pP.iface, p1.iface)
+eq(F.price_mult(v, "grain"), 25, "fifty turns of cover: still 25")
+p1.held.coal = 300; v = F.stock_view(pP.iface, p1.iface)
+eq(F.price_mult(v, "coal"), 25, "overfull: still 25")
+local pZ = faction("pZ", { human = true })
+local p0 = region("p0", 9500, 0, 0, {}); own(pZ, p0, true)
+eq(F.price_mult(F.stock_view(pZ.iface, p0.iface), "coal"), nil, "a pool with no room has no price")
+F.state.rates.upkeep = upkeep_was
+end
+
 -- EVERY ACTION GOES THROUGH UITrigger in multiplayer; computer factions and the switch refuse
 MP = true; SENT = {}
 F.request("lP", "sell", "coal")
-eq(SENT[1][2], "dmr1|sell|coal", "multiplayer: sent, not run"); eq(TREASURY.lP, 30, "nothing paid yet")
-ui_trigger(SENT[1][1], SENT[1][2]); eq(TREASURY.lP, 60, "the trigger runs it")
+eq(SENT[1][2], "dmr1|sell|coal", "multiplayer: sent, not run"); eq(TREASURY.lP, 125, "nothing paid yet")
+ui_trigger(SENT[1][1], SENT[1][2]); eq(TREASURY.lP, 133, "the trigger runs it, l1's 10 at 0.87 paying 8")
 F.request("sP", "send", "brass", "s4"); eq(SENT[2][2], "dmr1|send|brass|s4", "a send carries the settlement")
 ui_trigger(lP.cqi, SENT[2][2]); eq(s4.held.brass or 0, 0, "another player's trigger cannot move my resources")
 ui_trigger(sP.cqi, SENT[2][2]); eq(s2.held.brass, 0, "my own does: it leaves for the road")
@@ -1110,7 +1390,7 @@ a1.held.coal = 300
 F.dispatch("ai1", { "sell", "coal" }); eq(TREASURY.ai1, nil, "a computer-run faction has no panel")
 eq(a1.held.coal, 300, "and sells nothing")
 F.state.rates.actions = false
-l1.held.coal = 190; F.request("lP", "sell", "coal"); eq(TREASURY.lP, 60, "switched off: no sale")
+l1.held.coal = 190; F.request("lP", "sell", "coal"); eq(TREASURY.lP, 133, "switched off: no sale")
 F.request("lP", "export", "coal"); eq(F.stopped("lP", "export", "coal"), true, "but trade switches still work")
 F.state.rates.actions = true
 eq(#ERRORS, 0, "no script errors in the actions")
@@ -1265,6 +1545,7 @@ end
 local function last_ship() return F.state.ships[#F.state.ships] end
 local function field(f, x, y, cqi, garrison)
     return { is_armed_citizenry = function() return garrison == true end,
+             is_null_interface = function() return false end,   -- F.captor skips a force a battle has destroyed
              has_general = function() return true end,
              force_type = function() return { key = function() return "ARMY" end } end,
              command_queue_index = function() return cqi + 1000 end,
@@ -1521,6 +1802,706 @@ eq(SAVED.derpy_mr_flows.supply.pP.prov_p.materials, true, "the switches are kept
 eq(SAVED.derpy_mr_flows.ships[#SAVED.derpy_mr_flows.ships].f, "gP", "and the shipments on the road")
 F.state.rates.supply = false
 eq(#ERRORS, 0, "no script errors in phase 5: " .. table.concat(ERRORS, "; "))
+
+-- ---- agreement convoys (spec 2026-10-23, section 5.1): goods leave as a convoy, nothing lands that turn ----
+;(function()
+    local saved, turn, routes, known = F.state, TURN, DERPY_MR_TERRAIN_ROUTES, F.reach_known
+    eq(routes, nil, "no terrain stub is standing")
+    F.state = { factions = {}, rates = F.read_rates() }
+    for _, k in ipairs({ "upkeep", "supply", "events", "army_provisions", "escort" }) do F.state.rates[k] = false end
+    F.reach_known, TURN = {}, 310000
+    local made = {}
+    -- a human exporter and a human buyer (a target is a human's setting), one settlement each, a target of 5
+    local function pair(tag, ex, bx, held, targets)
+        local e, b = faction("cv" .. tag .. "E", { human = true }), faction("cv" .. tag .. "B", { human = true })
+        local er, br = region("cv" .. tag .. "E1", ex, 0, 600, held), region("cv" .. tag .. "B1", bx, 0, 600, {})
+        own(e, er, true); own(b, br, true)
+        e.partners, b.partners = { b }, { e }
+        made[#made + 1] = e; made[#made + 1] = b
+        for _, stem in ipairs(targets) do F.set_stock_policy(b.name, stem, "target", "5") end
+        return e, b, er, br
+    end
+    local function newest() local l = F.convoys(); return l[#l] end
+
+    -- THE GOODS LEAVE: debited at dispatch, nothing arrives, one convoy carries them
+    local e, b, er, br = pair("1", 0, 400, { coal = 100 }, { "coal" })
+    local c0 = er.held.coal
+    F.trade(e.iface)
+    eq(er.held.coal, c0 - 5, "debited at dispatch")
+    eq(LOG[#LOG][1] .. " " .. LOG[#LOG][2] .. " " .. LOG[#LOG][3], "cv1E1 derpy_mr_store_coal_traded -5",
+       "the departure is booked on the traded factor, not the moved one a cart books")
+    eq(br.held.coal or 0, 0, "nothing arrives the turn it leaves")
+    eq(#F.convoys(), 1, "one convoy for the one partner")
+    local c = F.convoys()[1]
+    eq(c.f, "cv1E", "the exporter owns it"); eq(c.buyer, "cv1B", "bound for the buyer")
+    eq(c.from, "cv1E1", "from the exporter's capital"); eq(c.to, "cv1B1", "to the buyer's capital")
+    eq(c.basket.coal, 5, "carrying the share the partner needs"); eq(c.at, TURN, "it left this turn")
+    eq(c.due, c.at + 1, "no grid in the stub: one turn")
+    eq(c.road, nil, "no road to pack"); eq(c.x, 0, "it waits at the exporter's capital"); eq(c.y, 0, "on its row")
+    eq(c.id, F.CONVOY_PREFIX .. "1", "named by the sequence"); eq(F.state.convoy_seq, 1, "which the save keeps")
+    eq((F.book("cv1E").now.coal or {}).traded_out, 5, "the exporter's ledger books the departure")
+    eq((F.book("cv1B").now.coal or {}).traded_in, nil, "and the buyer's books nothing yet")
+    F.trade(e.iface, true)
+    eq(#F.convoys(), 1, "a preview writes no convoy"); eq(er.held.coal, c0 - 5, "and debits nothing")
+
+    -- THE ROAD: the reach path, packed, starting at the exporter, three turns for 81 steps
+    local road = road_82()
+    DERPY_MR_TERRAIN_ROUTES = { reach = function() return true, nil, road end }
+    local e2, b2, er2, br2 = pair("2", 81, 0, { coal = 100 }, { "coal" })
+    F.reach_known = {}       -- no answer standing: the road comes from the call that just made it
+    F.trade(e2.iface)
+    local c2 = newest()
+    eq(c2.f, "cv2E", "the second pair's convoy"); eq(er2.held.coal, 95, "debited")
+    eq(c2.id, F.CONVOY_PREFIX .. "2", "the next convoy takes the next number"); eq(F.state.convoy_seq, 2, "and the sequence moves on")
+    eq(c2.due, c2.at + 3, "81 steps at 40 a turn: three turns")
+    eq(type(c2.road), "string", "the road is one packed string")
+    eq(#F.unpack_road(c2.road), 82, "with every point"); eq(F.unpack_road(c2.road)[1][1], 81, "the road starts at the exporter")
+    eq(F.unpack_road(c2.road)[82][1], 0, "and ends at the buyer"); eq(c2.x, 81, "the convoy waits at the exporter's capital"); eq(c2.y, 0, "on its row")
+    eq(road[1][1], 0, "the path F.reach keeps is not turned round in place")
+    local e3, b3, er3 = pair("3", 0, 81, { coal = 100 }, { "coal" })
+    F.trade(e3.iface)
+    local c3 = newest()
+    eq(c3.f, "cv3E", "the third pair's convoy")
+    eq(F.unpack_road(c3.road)[1][1], 0, "a road that already leaves the exporter is kept as it is"); eq(c3.x, 0, "and the convoy starts there")
+    eq(F.unpack_road(c3.road)[82][1], 81, "ending at the buyer")
+    -- CARGO ON THE ROAD COUNTS AS INCOMING (Task 2): the buyer's targets, reserves, forecasts and next trade all see it
+    eq(F.incoming("cv2B", "cv2B1", "coal"), 5, "cargo on the road counts")
+    local v2 = F.stock_view(b2.iface, br2.iface)
+    eq(v2.incoming.coal, 5, "the buyer's store view counts it")
+    eq(v2.due[1].due, c2.due, "with its arrival turn"); eq(v2.due[1].due, c2.at + 3, "the road's three turns, not the cart pace")
+    eq(v2.due[1].stem, "coal", "naming its good"); eq(v2.due[1].n, 5, "and its amount")
+    eq(F.stock_forecast(v2)[F.GOOD.coal.use].incoming, 5, "the forecast counts it as incoming")
+    eq(F.incoming("cv2E", "cv2B1", "coal"), 0, "the exporter is owed nothing"); eq(F.incoming("cv2B", "cv2E1", "coal"), 0, "nor is another store")
+    eq(F.incoming("cv2B", "cv2B1", "iron"), 0, "and no other good is on the road")
+    -- only F.convoy_new creates the list, so a save with no convoys stays without one
+    local list = F.state.convoys; F.state.convoys = nil
+    eq(#F.ships_to("cv2B", "cv2B1"), 0, "no convoys, nothing on the road"); eq(F.state.convoys, nil, "and reading made no list")
+    F.state.convoys = list
+    c2.basket.iron = 0
+    eq(#F.ships_to("cv2B", "cv2B1"), 1, "an emptied basket entry is not on the road"); c2.basket.iron = nil
+    -- THE NEXT TRADE SEES THE ROAD: a target of 8 is first 5, then what the road leaves of the need, then nothing
+    local e10, b10, er10, br10 = pair("10", 0, 81, { coal = 100 }, { "coal" })
+    F.set_stock_policy(b10.name, "coal", "target", "8")
+    local need0 = F.import_need(F.stock_view(b10.iface, br10.iface), "coal")
+    eq(need0, 8, "the buyer's need is its target")
+    F.trade(e10.iface)
+    eq(newest().basket.coal, 5, "the first convoy carries 5")
+    eq(F.import_need(F.stock_view(b10.iface, br10.iface), "coal"), need0 - 5, "the cargo on the road comes off the need")
+    local sent10 = #F.convoys()
+    TURN = TURN + 1; F.trade(e10.iface)
+    eq(#F.convoys(), sent10 + 1, "the next turn's trade sends a second convoy")
+    eq(newest().basket.coal, 3, "carrying only what the first left of the need (min of 4 and 3)")
+    eq(er10.held.coal, 92, "debited for both")
+    eq(F.import_need(F.stock_view(b10.iface, br10.iface), "coal"), 0, "the target is now covered by cargo")
+    TURN = TURN + 1; F.trade(e10.iface)
+    eq(#F.convoys(), sent10 + 1, "a third turn with the target covered sends none"); eq(er10.held.coal, 92, "and takes nothing")
+    -- the duration: steps, not points; never more than the reach, never under one
+    local function steps(n) local p = {}; for i = 0, n do p[#p + 1] = { i, 0 } end return p end
+    eq(F.convoy_turns(nil), 1, "no road: one turn"); eq(F.convoy_turns({ { 0, 0 } }), 1, "a road of one point is still a turn")
+    eq(F.convoy_turns(steps(40)), 1, "40 steps is a turn"); eq(F.convoy_turns(steps(41)), 2, "41 steps is two")
+    eq(F.convoy_turns(steps(81)), 3, "81 steps is three"); eq(F.convoy_turns(steps(400)), 6, "never past the trade reach")
+    F.state.rates.reach = 2; eq(F.convoy_turns(steps(400)), 2, "the reach setting is the limit"); F.state.rates.reach = 6
+    -- a road is its HEXES, not its points: a bridge is one point and as many hexes as the reach search charged it
+    eq(F.road_steps({}), 0, "no points, no hexes"); eq(F.road_steps({ { 4, 4 } }), 0, "one point, no hexes")
+    eq(F.road_steps(steps(40)), 40, "unit steps count one each"); eq(F.road_steps({ { 0, 0 }, { 3, -5 } }), 5, "a jump is its longer span")
+    eq(F.road_steps({ { 7, 7 }, { 7, 7 } }), 1, "and no move is still a hex")
+    eq(F.road_steps({ { 0, 0 }, { 40, 0 }, { 80, 0 }, { 81, 0 } }), 81, "two bridges of 40 and a step: 81 hexes in four points")
+    eq(F.convoy_turns({ { 0, 0 }, { 40, 0 }, { 80, 0 }, { 81, 0 } }), 3, "81 hexes are three turns, not the one that four points would be")
+    eq(F.pack_road({ { 1, 2 }, { 30, 4 } }), "1:2;30:4", "x:y points joined by semicolons")
+    local back = F.unpack_road("1:2;30:4")
+    eq(#back, 2, "two points back"); eq(back[2][1], 30, "in order"); eq(back[2][2], 4, "with both coordinates")
+    eq(type(back[1][1]), "number", "numbers, not strings")
+    eq(F.pack_road(nil), nil, "no road packs to nothing"); eq(F.pack_road({}), nil, "and an empty one too")
+    eq(F.unpack_road(nil), nil, "nothing unpacks to nothing"); eq(F.unpack_road(""), nil, "and so does an empty string")
+
+    -- TWO GOODS, ONE PARTNER: one convoy; and a throw at the second good leaves the first on the road
+    local function index(stem) for i, g in ipairs(DERPY_MR_FLOWS_GOODS) do if g.stem == stem then return i end end end
+    local first, second = "coal", "iron"
+    if index(first) > index(second) then first, second = second, first end
+    local e4, b4, er4 = pair("4", 0, 400, { coal = 100, iron = 100 }, { "coal", "iron" })
+    local count = #F.convoys()
+    F.trade(e4.iface)
+    eq(#F.convoys(), count + 1, "two goods to one partner ride in one convoy")
+    eq(newest().basket.coal, 5, "the coal"); eq(newest().basket.iron, 5, "and the iron")
+    -- each good of a basket counts alone, and the entries come in goods order
+    eq(F.incoming(b4.name, "cv4B1", "coal"), 5, "a stem asks for its own good: the coal"); eq(F.incoming(b4.name, "cv4B1", "iron"), 5, "the iron")
+    eq(F.incoming(b4.name, "cv4B1"), 10, "and every good when none is named")
+    eq(#F.ships_to(b4.name, "cv4B1", "coal"), 1, "one entry for a named good")
+    local both = F.ships_to(b4.name, "cv4B1")
+    eq(#both, 2, "one entry a good"); eq(both[1].stem, first, "in goods order"); eq(both[2].stem, second, "whichever the goods list puts first")
+    eq(both[1].convoy, newest().id, "each entry names its convoy"); eq(both[2].due, newest().due, "and carries its arrival turn")
+    local e11, b11 = pair("11", 0, 400, {}, {})
+    local everything = {}
+    for _, g in ipairs(DERPY_MR_FLOWS_GOODS) do everything[g.stem] = 1 end
+    F.convoy_new(e11.iface, b11.iface, everything, nil)
+    local walk = F.ships_to(b11.name, "cv11B1")
+    eq(#walk, #DERPY_MR_FLOWS_GOODS, "a basket of every good gives an entry for each")
+    local ordered = true
+    for i, g in ipairs(DERPY_MR_FLOWS_GOODS) do if walk[i].stem ~= g.stem then ordered = false end end
+    eq(ordered, true, "walked in goods order, not the order a table happens to hold them")
+    local e5, b5, er5 = pair("5", 0, 400, { coal = 100, iron = 100 }, { "coal", "iron" })
+    local real = F.route_goods
+    F.route_goods = function(r, stem, d) if stem == second then error("boom at the second good") end return real(r, stem, d) end
+    ERRORS = {}
+    F.guard(F.trade, e5.iface)
+    F.route_goods = real
+    local c5 = newest()
+    eq(c5.f, "cv5E", "a convoy left although the second good threw")
+    eq(c5.basket[first], 5, "carrying the good already taken"); eq(c5.basket[second], nil, "and not the one that threw")
+    eq(er5.held[first], 95, "the first good is debited"); eq(er5.held[second], 100, "the one that threw never was")
+    eq(#ERRORS, 1, "the throw is logged once"); eq(string.find(ERRORS[1], "boom at the second good", 1, true) ~= nil, true, "with its message")
+    ERRORS = {}
+    -- a debit the engine refuses sends nothing at all
+    local e6, b6, er6 = pair("6", 0, 400, { coal = 100 }, { "coal" })
+    count = #F.convoys()
+    F.route_goods = function() return false end
+    F.trade(e6.iface)
+    F.route_goods = real
+    eq(#F.convoys(), count, "a refused debit starts no convoy"); eq(er6.held.coal, 100, "and takes nothing")
+
+    -- A CAPITAL WITH NO SETTLEMENT: no position to give, but the goods already taken still ride in a convoy
+    local e8, b8, er8 = pair("8", 0, 400, { coal = 100 }, { "coal" })
+    er8.iface.settlement = function() return NULL end
+    count = #F.convoys()
+    F.trade(e8.iface)
+    eq(#F.convoys(), count + 1, "a capital with no settlement still sends its convoy")
+    local c8 = newest()
+    eq(c8.f, "cv8E", "the eighth pair's convoy"); eq(c8.basket.coal, 5, "carrying the goods taken"); eq(er8.held.coal, 95, "debited")
+    eq(F.unpack_road(c8.road)[1][1], 0, "the road, which cannot be turned without a position, is kept as given")
+    DERPY_MR_TERRAIN_ROUTES = nil
+    local e9, b9, er9 = pair("9", 0, 400, { coal = 100 }, { "coal" })
+    er9.iface.settlement = function() return NULL end
+    F.trade(e9.iface)
+    local c9 = newest()
+    eq(c9.f, "cv9E", "the ninth pair's convoy"); eq(c9.basket.coal, 5, "carries the goods taken with no road either")
+    eq(c9.x, nil, "and no position"); eq(c9.road, nil, "no road"); eq(c9.due, c9.at + 1, "one turn")
+
+    -- THE GUARD: a trade that throws does not stop the turn start's duty
+    local e7, b7, er7, br7 = pair("7", 0, 400, { coal = 100 }, { "coal" })
+    br7.made = { coal = 30 }
+    F.made_cache = nil
+    local gold0, armed = TREASURY.cv7E or 0, true
+    F.route_goods = function(r, stem, d) if armed then armed = false; error("boom in the trade") end return real(r, stem, d) end
+    TURN = TURN + 1; turn_start(e7)
+    F.route_goods = real
+    eq((TREASURY.cv7E or 0) < gold0, true, "the duty still ran after the trade threw")
+    local logged = false
+    for _, m in ipairs(ERRORS) do if string.find(m, "boom in the trade", 1, true) then logged = true end end
+    eq(logged, true, "and the message is in the log")
+    ERRORS = {}
+
+    -- A CONTRACT CART ON THE ROAD IS COMMITTED TOO. This replaces the contract block's "free trade cannot duplicate
+    -- committed deficit", which could not fail: that buyer's capital held 500 grain against a target of 70, so F.trade
+    -- never sent. Here the capital is short by D, a contract cart of n grain already comes, and free trade sends D - n.
+    F.state.ship_seq = 97000
+    local e12, b12, er12, br12 = pair("12", 0, 400, { grain = 400 }, {})
+    F.set_stock_policy(b12.name, "grain", "target", "22")
+    local D = F.import_need(F.stock_view(b12.iface, br12.iface), "grain")
+    eq(D, 22, "the capital is short by its target")
+    local contract = F.route_create(b12.iface, er12.key, br12.key, "grain", 10, 10)
+    eq(contract ~= nil, true, "a contract for the capital")
+    F.routes_turn(b12.iface)
+    local cart = F.ships()[#F.ships()]
+    eq(cart ~= nil and cart.recipient, b12.name, "its cart is bound to the buyer"); eq(cart.to, br12.key, "and to the capital")
+    local n = cart.n
+    eq(F.incoming(b12.name, br12.key, "grain"), n, "the cart counts as incoming")
+    eq(F.import_need(F.stock_view(b12.iface, br12.iface), "grain"), D - n, "and comes off the need")
+    eq(D - n > 0, true, "the capital is still short, so the case is not empty")
+    count = #F.convoys()
+    F.trade(e12.iface)
+    eq(#F.convoys(), count + 1, "free trade sends a convoy for what is left")
+    eq(newest().f, "cv12E", "from the seller of the contract"); eq(newest().buyer, "cv12B", "to the same buyer")
+    eq(newest().basket.grain, D - n, "carrying the need less the contract cart, never the whole need")
+    TURN = TURN + 1; F.trade(e12.iface)
+    eq(#F.convoys(), count + 1, "and with the cart and the convoy both counted nothing more goes")
+
+    -- STEPPING, ARRIVAL, SEIZURE, RETURN (Task 3). The stub road runs (0,0) to (81,0): three turns, 27 hexes in after the
+    -- first turn on it and 54 after the second. A case that must not trade calls F.convoys_turn through advance_convoys.
+    local function listed(c) for _, x in ipairs(F.convoys()) do if x == c then return true end end return false end
+    local function the_road() DERPY_MR_TERRAIN_ROUTES = { reach = function() return true, nil, road end }; F.reach_known = {} end
+    do
+        the_road()
+        local o, ob = pair("19", 0, 81, { coal = 100 }, { "coal" })
+        F.trade(o.iface); local other = newest()
+        local e, b, er, br = pair("20", 0, 81, { coal = 100 }, { "coal" })
+        F.trade(e.iface)
+        local c = newest()
+        eq(c.f, "cv20E", "the exporter's convoy"); eq(c.due, c.at + 3, "three turns on the road"); eq(c.x, 0, "it starts at the exporter")
+        TURN = TURN + 1; turn_start(e)
+        eq(c.x, 27, "a turn on: a third of the way"); eq(c.y, 0, "along the road")
+        eq(br.held.coal or 0, 0, "nothing has landed"); eq(listed(c), true, "and it is still on the road")
+        eq(other.x, 0, "another exporter's convoy is not moved by this one's turn start"); eq(listed(other), true, "nor taken off the list")
+        TURN = TURN + 1; turn_start(e)
+        eq(c.x, 54, "two turns on: two thirds of the way"); eq(br.held.coal or 0, 0, "still nothing landed")
+        TURN = TURN + 1; turn_start(e)
+        eq(br.held.coal, 5, "arrives on its due turn"); eq(listed(c), false, "and is gone")
+        eq((F.book("cv20B").now.coal or {}).traded_in, 5, "the buyer's ledger books the arrival")
+        eq(listed(other) and other.x == 0, true, "the other exporter's convoy goes on waiting for its own turn start")
+
+    end
+    do
+        -- WHAT DOES NOT FIT IS LOST: a capital of 200 holding 198 takes 2 of the 5
+        local e, b, er, br = pair("21", 0, 81, { coal = 100 }, { "coal" })
+        F.trade(e.iface)
+        local c = newest()
+        br.cap, br.held.coal = 200, 198
+        advance_convoys(e); advance_convoys(e)
+        eq(listed(c), true, "two turns on a three turn road: still travelling")
+        advance_convoys(e)
+        eq(br.held.coal, 200, "the capital takes what it has room for"); eq(listed(c), false, "and the convoy is gone")
+        eq((F.book("cv21B").now.coal or {}).traded_in, 2, "the ledger books the 2 that landed, not the 5")
+        eq((F.book("cv21E").now.coal or {}).traded_out, 5, "and the exporter's departure stays all 5")
+
+    end
+    do
+        -- THE BUYER'S CAPITAL AS IT STANDS ON THE DAY: a new home before the convoy lands takes the goods
+        local e, b, er, br = pair("22", 0, 81, { coal = 100 }, { "coal" })
+        F.trade(e.iface)
+        local c = newest()
+        eq(c.to, "cv22B1", "bound for the capital of the day it left")
+        local home2 = region("cv22B2", 300, 0, 600, {}); own(b, home2, true)
+        -- one step later the cargo is counted at the NEW capital, none at the old one, so the exporter's next trade sees
+        -- the buyer's need as met and sends no second convoy against it
+        advance_convoys(e)
+        eq(c.to, "cv22B2", "the convoy follows the buyer's capital while it travels")
+        eq(F.incoming(b.name, "cv22B2", "coal"), 5, "the new capital counts the cargo as incoming"); eq(F.incoming(b.name, "cv22B1", "coal"), 0, "the old one none")
+        local sent = #F.convoys()
+        F.trade(e.iface)
+        eq(#F.convoys(), sent, "no second convoy against a need the road already covers")
+        advance_convoys(e)
+        eq(c.to, "cv22B2", "a second step keeps it there")
+        -- the capital moves AGAIN after the last step, so the goods go to the one the arrival day finds, not the last one seen
+        local home3 = region("cv22B3", 350, 0, 600, {}); own(b, home3, true)
+        advance_convoys(e)
+        eq(listed(c), false, "arrived")
+        eq(home3.held.coal, 5, "the capital of the arrival day receives it"); eq(home2.held.coal or 0, 0, "not the one the last step saw")
+        eq(br.held.coal or 0, 0, "and the first one nothing")
+
+    end
+    do
+        -- A CONVOY WITH NO POSITION (a capital with no settlement and no road): it stays put, no army can be near it,
+        -- and it lands on its day
+        DERPY_MR_TERRAIN_ROUTES = nil
+        local e, b, er, br = pair("23", 0, 400, { coal = 100 }, { "coal" })
+        er.iface.settlement = function() return NULL end
+        local cap = faction("cv23C"); local capr = region("cv23C1", 0, 0, 600, {}); own(cap, capr, true)
+        war(e, cap); cap.armies = { field(cap, 0, 0, 641) }
+        F.trade(e.iface)
+        local c = newest()
+        eq(c.x, nil, "it has no position"); eq(c.due, c.at + 1, "and one turn to go")
+        F.convoys_turn(e.iface)
+        eq(listed(c), true, "on the day it left it is on its way"); eq(c.x, nil, "still with no position")
+        advance_convoys(e)
+        eq(br.held.coal, 5, "no army can be near it, so it arrives on time"); eq(capr.held.coal or 0, 0, "and the army at its capital took nothing")
+        -- ... and with no position a convoy still goes home when the treaty ends: to the exporter's capital
+        local e, b, er, br = pair("34", 0, 400, { coal = 100 }, { "coal" })
+        er.iface.settlement = function() return NULL end
+        F.trade(e.iface)
+        local c = newest()
+        eq(c.x, nil, "no position again"); war(e, b)
+        advance_convoys(e)
+        eq(listed(c), false, "gone"); eq(er.held.coal, 100, "back in the capital, the debit undone"); eq(br.held.coal or 0, 0, "and not delivered")
+
+    end
+    do
+        -- SEIZED: an army at war with the exporter, within reach of the convoy, takes the basket to the captor's nearest
+        -- settlement; a garrison and an army out of reach do not. Each look is a new turn: the list is kept per turn.
+        the_road()
+        local e, b, er, br = pair("24", 0, 81, { coal = 100 }, { "coal" })
+        local cap = faction("cv24C", { human = true })
+        local far, near = region("cv24C1", 500, 500, 600, {}), region("cv24C2", 40, 0, 600, {})
+        own(cap, far, true); own(cap, near)
+        F.trade(e.iface)
+        local c = newest()
+        advance_convoys(e); eq(c.x, 27, "a turn on the road")
+        war(e, cap)
+        cap.armies = { field(cap, c.x + F.SHIP.near + 1, c.y, 601), field(cap, c.x, c.y, 602, true) }
+        advance_convoys(e)
+        eq(listed(c), true, "an army out of reach and a garrison seize nothing"); eq(c.x, 54, "so it goes on")
+        cap.armies = { field(cap, c.x, c.y, 603) }
+        advance_convoys(e)
+        eq(listed(c), false, "an army at war with its exporter, near it, seizes it")
+        eq(near.held.coal, 5, "the captor's nearest settlement gets the basket"); eq(far.held.coal or 0, 0, "not its other one")
+        eq(br.held.coal or 0, 0, "the buyer gets nothing")
+        eq((F.book("cv24C").now.coal or {}).raided_in, 5, "the captor's ledger books it as raided in")
+        eq((F.book("cv24E").now.coal or {}).raided_out, nil, "the exporter's loss was booked at dispatch: no second line")
+
+    end
+    do
+        -- ... and on its due day the army still gets there first: seizure is asked before arrival
+        DERPY_MR_TERRAIN_ROUTES = nil
+        local e, b, er, br = pair("25", 0, 400, { coal = 100 }, { "coal" })
+        local cap = faction("cv25C", { human = true }); local capr = region("cv25C1", 700, 0, 600, {}); own(cap, capr, true)
+        war(e, cap)
+        F.trade(e.iface)
+        local c = newest()
+        cap.armies = { field(cap, c.x, c.y, 604) }
+        advance_convoys(e)
+        eq(listed(c), false, "gone"); eq(capr.held.coal, 5, "seized on the day it was due"); eq(br.held.coal or 0, 0, "and not delivered")
+
+    end
+    do
+        -- THE TREATY GONE, THE BUYER DEAD OR LANDLESS: the basket goes home to the exporter's settlement nearest the convoy
+        -- (here the second one, 40 along, not the capital at 0), a convoy at x = 27 after its first turn
+        the_road()
+        local e, b, er, br = pair("26", 0, 81, { coal = 100 }, { "coal" })
+        local er2 = region("cv26E2", 40, 0, 600, {}); own(e, er2)
+        F.trade(e.iface)
+        local c = newest()
+        advance_convoys(e); eq(c.x, 27, "a turn on the road")
+        war(e, b)
+        advance_convoys(e)
+        eq(listed(c), false, "war between the two ends the convoy")
+        eq(er2.held.coal, 5, "the basket is back in the exporter's settlement nearest it"); eq(er.held.coal, 95, "the capital got nothing back")
+        eq(br.held.coal or 0, 0, "and the buyer none")
+        eq((F.book("cv26E").now.coal or {}).moved_in, 5, "the exporter's ledger books it as moved in")
+
+    end
+    do
+        local e, b, er, br = pair("27", 0, 81, { coal = 100 }, { "coal" })
+        local er2 = region("cv27E2", 40, 0, 600, {}); own(e, er2)
+        F.trade(e.iface)
+        local c = newest()
+        advance_convoys(e)
+        b.dead = true
+        advance_convoys(e)
+        eq(listed(c), false, "a dead buyer ends it"); eq(er2.held.coal, 5, "returned, not lost"); eq(br.held.coal or 0, 0, "and not delivered")
+
+    end
+    do
+        local e, b, er, br = pair("28", 0, 81, { coal = 100 }, { "coal" })
+        local er2 = region("cv28E2", 40, 0, 600, {}); own(e, er2)
+        F.trade(e.iface)
+        local c = newest()
+        advance_convoys(e)
+        lose(b, br); b.home = nil
+        eq(F.capital(b.iface), nil, "the buyer has no settlement left, as a horde")
+        advance_convoys(e)
+        eq(listed(c), false, "a buyer with no settlement ends it"); eq(er2.held.coal, 5, "returned, not lost")
+
+    end
+    do
+        -- A THROW WHILE THE GOODS MOVE leaves the convoy off the list: it is taken off first, so it cannot deliver twice
+        local e, b, er, br = pair("35", 0, 81, { coal = 100, iron = 100 }, { "coal", "iron" })
+        F.trade(e.iface)
+        local c = newest()
+        eq(c.basket.coal, 5, "two goods in one convoy"); eq(c.basket.iron, 5, "the iron too")
+        advance_convoys(e); advance_convoys(e)
+        local real_move, moves = F.move, 0
+        F.move = function(...) moves = moves + 1; if moves == 2 then error("boom while moving") end return real_move(...) end
+        ERRORS = {}
+        TURN = TURN + 1; F.guard(F.convoys_turn, e.iface)
+        F.move = real_move
+        eq(listed(c), false, "the convoy is gone although a move threw")
+        eq((br.held.coal or 0) + (br.held.iron or 0), 5, "the good moved before the throw landed once")
+        eq(#ERRORS, 1, "the throw is logged once"); ERRORS = {}
+        advance_convoys(e)
+        eq((br.held.coal or 0) + (br.held.iron or 0), 5, "and a later turn delivers nothing again")
+
+        -- ... the same for a SEIZED convoy and a RETURNED one: off the list first, the one good that moved landed once
+        local function turn_with_a_throw(exporter)   -- its next turn, the second F.move of it raising
+            local real_move, moves = F.move, 0
+            F.move = function(...) moves = moves + 1; if moves == 2 then error("boom while moving") end return real_move(...) end
+            ERRORS = {}
+            TURN = TURN + 1; F.guard(F.convoys_turn, exporter.iface)
+            F.move = real_move
+        end
+        DERPY_MR_TERRAIN_ROUTES = nil
+        local e, b, er, br = pair("37", 0, 400, { coal = 100, iron = 100 }, { "coal", "iron" })
+        local cap = faction("cv37C", { human = true }); local capr = region("cv37C1", 700, 0, 600, {}); own(cap, capr, true)
+        F.trade(e.iface)
+        local c = newest()
+        eq(c.basket.coal, 5, "two goods in one convoy"); eq(c.basket.iron, 5, "the iron too")
+        war(e, cap); cap.armies = { field(cap, c.x, c.y, 671) }
+        turn_with_a_throw(e)
+        eq(listed(c), false, "a seized convoy is gone although a move threw")
+        eq((capr.held.coal or 0) + (capr.held.iron or 0), 5, "the good moved before the throw landed once, at the captor")
+        eq(#ERRORS, 1, "the throw is logged once"); ERRORS = {}
+        advance_convoys(e)
+        eq((capr.held.coal or 0) + (capr.held.iron or 0), 5, "and a later turn seizes nothing again")
+        local e, b, er, br = pair("38", 0, 400, { coal = 100, iron = 100 }, { "coal", "iron" })
+        F.trade(e.iface)
+        local c = newest()
+        eq(c.basket.coal, 5, "two goods in one convoy"); eq(c.basket.iron, 5, "the iron too")
+        war(e, b)
+        turn_with_a_throw(e)
+        eq(listed(c), false, "a returned convoy is gone although a move threw")
+        eq((er.held.coal or 0) + (er.held.iron or 0), 195, "of the 190 left at the debit, the good moved before the throw is back once")
+        eq(#ERRORS, 1, "the throw is logged once"); ERRORS = {}
+        advance_convoys(e)
+        eq((er.held.coal or 0) + (er.held.iron or 0), 195, "and a later turn returns nothing again")
+        eq(br.held.coal or 0, 0, "nothing was delivered")
+
+        -- A RECORD ALREADY GONE MOVES NOTHING: a second arrival of the same convoy lands the basket once
+        local e, b, er, br = pair("39", 0, 400, {}, {})
+        local twice = F.convoy_new(e.iface, b.iface, { coal = 4 }, nil)
+        F.convoy_arrive(twice); F.convoy_arrive(twice)
+        eq(br.held.coal, 4, "the basket landed once")
+    end
+    do
+        -- IN ID ORDER: two convoys land the same turn on a capital with room for 5; the older takes its 4 and the younger
+        -- gets the 1 left (walked the other way round it would be 3 and 2)
+        DERPY_MR_TERRAIN_ROUTES = nil
+        local e, b, er, br = pair("36", 0, 400, {}, {})
+        local older = F.convoy_new(e.iface, b.iface, { coal = 4 }, nil)
+        local younger = F.convoy_new(e.iface, b.iface, { coal = 3 }, nil)
+        br.cap = 5
+        advance_convoys(e)
+        eq(listed(older) or listed(younger), false, "both landed")
+        eq(LOG[#LOG - 1][3], 4, "the older convoy landed first, all its 4"); eq(LOG[#LOG][3], 1, "the younger got the 1 that was left")
+        eq(br.held.coal, 5, "the capital is full")
+    end
+    do
+        -- AN EXPORTER WITH NO SETTLEMENT LOSES THE BASKET (on the road: a one-turn convoy would already have landed)
+        the_road()
+        local e, b, er, br = pair("29", 0, 81, { coal = 100 }, { "coal" })
+        F.trade(e.iface)
+        local c = newest()
+        advance_convoys(e)
+        eq(listed(c), true, "a turn on the road: still travelling")
+        lose(e, er); e.home = nil
+        war(e, b)
+        advance_convoys(e)
+        eq(listed(c), false, "gone"); eq(er.held.coal, 95, "an exporter with no settlement has nowhere to put it back")
+        eq(br.held.coal or 0, 0, "and the buyer got none of it")
+
+    end
+    do
+        -- A DEAD EXPORTER'S CONVOYS ARE SWEPT at a player's turn start: nowhere to return to, so the basket is destroyed
+        local e, b, er, br = pair("30", 0, 81, { coal = 100 }, { "coal" })
+        local alive, ab = pair("31", 0, 81, { coal = 100 }, { "coal" })
+        F.trade(e.iface); local c = newest()
+        F.trade(alive.iface); local survivor = newest()
+        local ghost = { id = F.CONVOY_PREFIX .. "9999", f = "cv_no_such_faction", buyer = b.name, from = "x", to = br.key,
+                        basket = { coal = 1 }, at = TURN, due = TURN + 1 }
+        F.state.convoys[#F.state.convoys + 1] = ghost
+        e.dead = true; ERRORS = {}
+        turn_start(b)
+        eq(listed(c), false, "the dead exporter's convoy is swept"); eq(listed(ghost), false, "and one whose exporter does not exist")
+        eq(listed(survivor), true, "a living exporter's convoy is not")
+        eq(er.held.coal, 95, "the basket is not returned"); eq(br.held.coal or 0, 0, "nor delivered")
+        eq(#ERRORS, 0, "no error in the sweep: " .. table.concat(ERRORS, "; "))
+
+    end
+    do
+        -- THE ONE LOOK: three convoys, one question to the engine for the enemy armies; a new turn asks again
+        DERPY_MR_TERRAIN_ROUTES = nil
+        local e = faction("cv32E", { human = true }); local er = region("cv32E1", 0, 0, 600, {}); own(e, er, true)
+        local buyers = {}
+        for i = 1, 3 do
+            local bf = faction("cv32B" .. i, { human = true })
+            own(bf, region("cv32B" .. i .. "1", 400 + i, 0, 600, {}), true)
+            bf.partners = { e }; buyers[i] = bf; made[#made + 1] = bf
+        end
+        e.partners = buyers; made[#made + 1] = e
+        for _, bf in ipairs(buyers) do F.convoy_new(e.iface, bf.iface, { coal = 1 }, nil) end
+        local looks, real_looks = 0, e.iface.factions_at_war_with
+        e.iface.factions_at_war_with = function(...) looks = looks + 1; return real_looks(...) end
+        advance_convoys(e)
+        eq(looks, 1, "three convoys, one look for enemy armies")
+        local foe = faction("cv32X"); own(foe, region("cv32X1", 900, 0, 600, {}), true)
+        war(e, foe)
+        local live = field(foe, 0, 0, 650)
+        foe.armies = { live, field(foe, 0, 0, 651, true) }
+        TURN = TURN + 1; looks = 0
+        local armies = F.enemy_armies(e.iface)
+        eq(looks, 1, "a new turn looks again")
+        eq(#armies, 1, "a garrison is not an army in the field"); eq(armies[1].f:name(), "cv32X", "the faction at war"); eq(armies[1].mf, live, "its force")
+        eq(armies[1].x, 0, "where it stands"); eq(armies[1].y, 0, "on both axes")
+        eq(F.captor(e.iface, { x = 0, y = 0 }) ~= nil, true, "it is near a convoy at the same spot"); eq(looks, 1, "and the same turn asks nobody again")
+        live.is_null_interface = function() return true end
+        eq(F.captor(e.iface, { x = 0, y = 0 }), nil, "a force destroyed since the list was made is skipped")
+        e.iface.factions_at_war_with = real_looks
+
+    end
+    do
+        -- SHIPMENTS SEIZE AS THEY DID: F.captor over the cached list against the walk it replaced (copied here as it stood),
+        -- for a computer owner and a human one, with and without an escort, from a spot beside each army and beside none
+        local function old_captor(owner, s)
+            local wars = owner:factions_at_war_with()
+            local skip_human = F.escorts_on() and not owner:is_human() and (s.escort or "") ~= ""
+            local r2 = F.SHIP.near * F.SHIP.near
+            for i = 0, wars:num_items() - 1 do
+                local o = wars:item_at(i)
+                if not (skip_human and o:is_human()) then
+                    local mfl = o:military_force_list()
+                    for j = 0, mfl:num_items() - 1 do
+                        local mf = mfl:item_at(j)
+                        if not mf:is_armed_citizenry() and mf:has_general() then
+                            local ch = mf:general_character()
+                            local dx, dy = ch:logical_position_x() - s.x, ch:logical_position_y() - s.y
+                            if dx * dx + dy * dy <= r2 then return o, mf end
+                        end
+                    end
+                end
+            end
+            return nil
+        end
+        local nr = F.SHIP.near
+        local ow_ai, ow_hu = faction("cv33O"), faction("cv33H", { human = true })
+        local en_hu, en_ai = faction("cv33EH", { human = true }), faction("cv33EA")
+        for _, ow in ipairs({ ow_ai, ow_hu }) do war(ow, en_hu); war(ow, en_ai) end
+        en_hu.armies = { field(en_hu, 0, 0, 660), field(en_hu, 10 * nr, 0, 661, true) }
+        en_ai.armies = { field(en_ai, 4 * nr, 0, 662) }
+        local rates, seen, hits = F.state.rates, 0, 0
+        rates.escort = true
+        for _, ow in ipairs({ ow_ai, ow_hu }) do
+            TURN = TURN + 1
+            for _, x in ipairs({ 0, nr, nr + 1, 4 * nr, 5 * nr, 5 * nr + 1, 10 * nr, 20 * nr }) do
+                for _, esc in ipairs({ "", "a,b" }) do
+                    local s = { x = x, y = 0, escort = esc }
+                    local o1, m1 = old_captor(ow.iface, s)
+                    local o2, m2 = F.captor(ow.iface, s)
+                    eq(o2 == o1 and m2 == m1, true, ow.name .. " at " .. x .. " escort '" .. esc .. "': the same captor as the walk")
+                    seen = seen + 1; if o1 then hits = hits + 1 end
+                end
+            end
+        end
+        eq(seen, 32, "every spot was asked for both owners"); eq(hits > 8 and hits < seen - 8, true, "some seize and some do not")
+        eq(old_captor(ow_ai.iface, { x = 0, y = 0, escort = "" }) ~= nil and old_captor(ow_ai.iface, { x = 0, y = 0, escort = "a" }) == nil, true,
+           "an escorted computer cart is passed over by a human army: the case is not empty")
+        rates.escort = false
+    end
+    DERPY_MR_TERRAIN_ROUTES = nil
+
+    -- A CONVOY THE REAL TRADE WRITES SURVIVES A SAVE AND LOAD: a field the load check rejects would drop it and its goods
+    do
+        local road = road_82()
+        DERPY_MR_TERRAIN_ROUTES = { reach = function() return true, nil, road end }
+        local e, b, er = pair("40", 81, 0, { coal = 100 }, { "coal" })
+        F.reach_known = {}; F.trade(e.iface)
+        DERPY_MR_TERRAIN_ROUTES = nil
+        local function keys()
+            local out = {}
+            for _, c in ipairs(F.convoys()) do
+                out[#out + 1] = table.concat({ c.id, c.f, c.buyer, c.from, c.to, c.basket.coal or 0, c.at, c.due,
+                                                tostring(c.road), tostring(c.x), tostring(c.y) }, "|")
+            end
+            return table.concat(out, ",")
+        end
+        local before = keys()
+        eq(string.find(before, "cv40E|", 1, true) ~= nil and string.find(before, "|81|0", 1, true) ~= nil, true,
+           "the trade wrote a convoy with a road and a position")
+        SAVED = {}; cm.saving_game_callbacks[1]({}); F.state = {}; cm.loading_game_callbacks[1]({})
+        eq(keys(), before, "every convoy the trade wrote is kept by the load, field for field")
+    end
+
+    -- A BRIDGED ROAD THROUGH THE REAL TRADE: four points, 81 hexes (two bridges of 40 and a step), three turns; by points it is one
+    do
+        local bridged = { { 0, 0 }, { 40, 0 }, { 80, 0 }, { 81, 0 } }
+        DERPY_MR_TERRAIN_ROUTES = { reach = function() return true, nil, bridged end }
+        local e, b = pair("41", 0, 81, { coal = 100 }, { "coal" })
+        F.reach_known = {}; F.trade(e.iface)
+        DERPY_MR_TERRAIN_ROUTES = nil
+        local c = newest()
+        eq(c.f, "cv41E", "the bridged pair's convoy"); eq(#F.unpack_road(c.road), 4, "carrying the four points")
+        eq(c.due, c.at + 3, "81 hexes at 40 a turn: three turns")
+    end
+
+    -- WHAT THE VAULT AND THE MAPS READ (Task 6, F.convoy_cargo): an entry for every convoy with a live exporter, with or
+    -- without a position, naming its largest good
+    do
+        DERPY_MR_TERRAIN_ROUTES = nil
+        F.state.convoys = nil
+        eq(#F.convoy_cargo(), 0, "no convoys, nothing to draw"); eq(F.state.convoys, nil, "and asking made no list")
+        F.state.convoys = {}
+        local function entry_of(c) for _, x in ipairs(F.convoy_cargo()) do if x.id == c.id then return x end end end
+        local e, b = pair("50", 0, 81, {}, {})
+        local c = F.convoy_new(e.iface, b.iface, { coal = 40, iron = 12 }, road_82())
+        local m = entry_of(c)
+        eq(m ~= nil, true, "a convoy on the road is listed")
+        eq(m.id, c.id, "named by its id"); eq(m.f, "cv50E", "its exporter"); eq(m.buyer, "cv50B", "its buyer")
+        eq(m.from, "cv50E1", "from the exporter's capital"); eq(m.to, "cv50B1", "to the buyer's")
+        eq(m.at, c.at, "the turn it left"); eq(m.due, c.due, "and the turn it is due")
+        eq(m.x, 0, "where it is"); eq(m.y, 0, "on both axes"); eq(m.convoy, true, "marked as a convoy, as a shipment is not")
+        eq(m.stem, "coal", "named by its largest good"); eq(m.n, 40, "and that good's amount")
+        eq(m.basket.coal, 40, "the whole basket rides along"); eq(m.basket.iron, 12, "every good in it")
+        -- THE LARGEST GOOD, equal amounts to the lower stem: three baskets of stems that tie
+        c.basket = { coal = 12, iron = 40 }
+        eq(entry_of(c).stem, "iron", "the larger of two, whatever their names"); eq(entry_of(c).n, 40, "with its amount")
+        -- (the stems are chosen so that Lua's own walk of a basket meets a higher stem before the lowest in some of them)
+        for i, tie in ipairs({ { "coal", { "iron", "coal" } }, { "grain", { "grain", "iron" } }, { "brimstone", { "coal", "brimstone" } },
+                               { "brimstone", { "iron", "coal", "brimstone", "grain" } } }) do
+            c.basket = {}
+            for _, stem in ipairs(tie[2]) do c.basket[stem] = 7 end
+            eq(entry_of(c).stem, tie[1], "equal amounts go to the lower stem, basket " .. i)
+            eq(entry_of(c).n, 7, "with the amount they share")
+        end
+        c.basket = { coal = 40, iron = 12 }
+        -- NO POSITION IS STILL LISTED (a capital with no settlement and no road): the Vault counts it, and only what
+        -- places a marker leaves it out, so F.convoy_cargo must keep it, whole
+        local e2, b2, er2 = pair("52", 0, 400, {}, {})
+        er2.iface.settlement = function() return NULL end
+        local nopos = F.convoy_new(e2.iface, b2.iface, { coal = 1, iron = 3 }, nil)
+        eq(nopos.x, nil, "the fixture has no position")
+        local lost = entry_of(nopos)
+        eq(lost ~= nil, true, "a convoy with no position is listed all the same"); eq(lost.x, nil, "with no x"); eq(lost.y, nil, "and no y")
+        eq(lost.f, "cv52E", "its exporter"); eq(lost.buyer, "cv52B", "its buyer"); eq(lost.due, nopos.due, "its due turn")
+        eq(lost.stem, "iron", "and its largest good"); eq(lost.basket.coal, 1, "with its whole basket")
+        eq(listed(nopos), true, "and it is still on the road")
+        -- A DEAD EXPORTER'S CONVOY IS NOT ON THE ROAD: its record waits for a player's turn start to sweep it
+        local e3, b3 = pair("53", 0, 81, {}, {})
+        local gone = F.convoy_new(e3.iface, b3.iface, { coal = 3 }, road_82())
+        eq(entry_of(gone) ~= nil, true, "a live exporter's convoy is listed")
+        e3.dead = true
+        eq(entry_of(gone), nil, "a dead exporter's convoy is not listed"); eq(listed(gone), true, "though its record is still in the list")
+        e3.dead = false
+        eq(entry_of(gone) ~= nil, true, "the check reads the exporter as it is now")
+        -- IN THE ORDER IT LEFT, and a read leaves the list as it found it
+        local all = F.convoy_cargo()
+        local pos = {}
+        for i, x in ipairs(all) do pos[x.id] = i end
+        eq(pos[c.id] < pos[nopos.id] and pos[nopos.id] < pos[gone.id], true, "in the order the convoys left")
+        eq(#all, 3, "all three, each with a live exporter")
+    end
+
+    -- THE TURN A HUMAN BUYER IS TOLD (F.convoy_due): a convoy lands at its exporter's turn start, and a round starts with the
+    -- human, so goods a computer sends land after the human's turn on the due turn and are first usable on the one after.
+    -- Every round from the one after departure: the buyer's turn first, or the exporter's start first, as the round runs.
+    do
+        DERPY_MR_TERRAIN_ROUTES = nil
+        local function first_use(exporter, br, c, buyer_first)
+            local first
+            for round = c.at + 1, c.at + 4 do
+                TURN = round
+                if buyer_first and not first and (br.held.coal or 0) > 0 then first = round end
+                F.convoys_turn(exporter.iface)
+                if not buyer_first and not first and (br.held.coal or 0) > 0 then first = round end
+            end
+            return first
+        end
+        local function told(c)
+            local from_cargo
+            for _, x in ipairs(F.convoy_cargo()) do if x.id == c.id then from_cargo = x.due end end
+            return F.ships_to(c.buyer, c.to, "coal")[1].due, from_cargo
+        end
+        -- a computer exporter and a human buyer: told the turn the buyer first holds the goods, the one after the landing
+        local e, b, er, br = pair("60", 0, 400, { coal = 100 }, {})
+        e.human = false
+        TURN = TURN + 1
+        local c = F.convoy_new(e.iface, b.iface, { coal = 5 }, nil)
+        eq(c.due, c.at + 1, "a one-turn road")
+        local shown, listed_due = told(c)
+        local first = first_use(e, br, c, true)
+        eq(first, c.due + 1, "the human's turn on the due turn comes before the landing, so the goods are there a turn later")
+        eq(shown, first, "the Trade tab is told that turn"); eq(listed_due, first, "and so is the Cargo on the road listing")
+        eq(c.due, c.at + 1, "the record's own due turn is the landing, unchanged")
+        -- a human exporter and a computer buyer: the goods land at the human's start and the computer plays after it
+        local e2, b2, er2, br2 = pair("61", 0, 400, { coal = 100 }, {})
+        b2.human = false
+        TURN = TURN + 1
+        local c2 = F.convoy_new(e2.iface, b2.iface, { coal = 5 }, nil)
+        local shown2, listed_due2 = told(c2)
+        local first2 = first_use(e2, br2, c2, false)
+        eq(first2, c2.due, "the buyer holds the goods on the due turn")
+        eq(shown2, first2, "told that turn"); eq(listed_due2, first2, "in the listing too")
+    end
+
+    for _, f in ipairs(made) do f.partners = {} end
+    eq(#ERRORS, 0, "no script errors in the convoy cases: " .. table.concat(ERRORS, "; "))
+    F.state, TURN, F.reach_known = saved, turn, known
+    DERPY_MR_TERRAIN_ROUTES = nil
+end)()
 
 -- ---- escort battles: the escort rolled at departure (spec 2026-10-09) ---------------------
 -- random_army_manager as CA's: a force is a flat list, one entry per weight point, kept by key
@@ -2737,8 +3718,9 @@ end)()
     F.set_stock_policy(f.name, "grain", "target", "auto")
     F.trade(f.iface)
     eq(F.use_total(F.stock(a.iface), "provisions") >= 30, true, "foods and partners cannot double-spend shared reserve")
-    local first = (r1.held.grain or 0) + (r1.held.salted_fish or 0)
-    local second = (r2.held.grain or 0) + (r2.held.salted_fish or 0)
+    local first = cargo_to(p1.name, "grain") + cargo_to(p1.name, "salted_fish")
+    local second = cargo_to(p2.name, "grain") + cargo_to(p2.name, "salted_fish")
+    eq(first > 0, true, "the first partner by key is sent something")
     eq(first >= second, true, "partners allocated by faction key")
     -- Partial incoming quantities permit another cart, enough incoming suppresses one.
     F.state.ships = {}
@@ -3266,24 +4248,67 @@ end)()
     F.route_turns = distance_turns
     local saved, turn = F.state, TURN
     F.state = { factions = {}, rates = F.read_rates(), ship_seq = 90000 }
-    F.state.rates.upkeep, F.state.rates.supply, F.state.rates.army_provisions = false, false, false
+    F.state.rates.supply, F.state.rates.army_provisions = false, false
     F.state.rates.escort = false
+    -- Upkeep on: the buyer eats and holds 60 salt at b, so b's provisions cover is 30 turns and its price sits at the floor, and a
+    -- partner cart's destination floor never binds in this block (its own case is below). The seller eats nothing, so its price is by fullness.
+    F.state.rates.upkeep = true
     TURN = 100000
     local buyer = faction("route_buyer", { human = true, gold = 10000 })
-    local seller = faction("route_seller", { gold = 10000 })
+    local seller = faction("route_seller", { gold = 10000, sc = "wh_main_sc_vmp_vampire_counts" })
     local a = region("route_a",0,0,1000,{grain=500})
-    local b = region("route_b",80,0,1000,{})
+    local b = region("route_b",80,0,1000,{salt=60})
     local c = region("route_c",400,0,1000,{grain=500})
     own(buyer,a,true); own(buyer,b); own(seller,c,true)
     buyer.partners={seller}; seller.partners={buyer}
     eq(F.route_turns(a.iface,b.iface),2,"coordinate duration")
     b.x=1; eq(F.route_turns(a.iface,b.iface),1,"minimum travel")
+    b.x=0; eq(F.route_turns(a.iface,b.iface),1,"one cell apart: still a turn")
     eq(F.route_turns(a.iface,c.iface),6,"maximum travel")
     b.x=80
+    -- THE ROAD'S LENGTH (agreement cargo, task 5): a shipment with a saved road takes its STEPS at F.ROAD_PER_TURN, as a convoy
+    -- does but never past six turns; with no road it is the straight line as before. Each case drops its cart and gives the grain back.
+    do
+        local grain, journey = a.held.grain, DERPY_MR_TERRAIN_ROUTES
+        local function line(points) local p = {} for i = 1, points do p[i] = { i - 1, 0 } end return p end
+        local function sent(road)
+            DERPY_MR_TERRAIN_ROUTES = { journey = function() return road end }
+            local s = F.ship(buyer.iface, a.iface, b.iface, "grain", 100)
+            DERPY_MR_TERRAIN_ROUTES = journey
+            assert(s, "the shipment was refused")
+            return s
+        end
+        b.x = 30
+        local winding = sent(line(100))
+        eq(winding.duration, 3, "a winding road of 99 hexes is 3 turns"); eq(winding.due, winding.at + 3, "and it is due then")
+        F.drop(winding)
+        local plain = sent(nil)
+        eq(plain.duration, 1, "no road: straight line"); F.drop(plain)
+        b.x = 80
+        local long = sent(line(80))
+        eq(long.duration, 2, "80 points are 79 hexes: 2 turns"); F.drop(long)
+        eq(F.route_turns(a.iface, b.iface, line(41)), 1, "40 steps are one turn")
+        eq(F.route_turns(a.iface, b.iface, line(42)), 2, "41 steps are two: the road counts steps, not points")
+        eq(F.route_turns(a.iface, b.iface, line(1)), 1, "a road of one point is never under one turn")
+        eq(F.route_turns(a.iface, b.iface, line(500)), 6, "a very long road is six turns, whatever the reach")
+        eq(F.route_turns(a.iface, b.iface, {}), 2, "an empty road is no road: the straight line")
+        -- a bridge is one point but as many hexes as the reach search charged for it: four points here, 81 hexes
+        local over = sent({ { 0, 0 }, { 40, 0 }, { 80, 0 }, { 81, 0 } })
+        eq(over.duration, 3, "a bridged road of four points and 81 hexes is 3 turns, not 1"); F.drop(over)
+        eq(F.route_turns(a.iface, b.iface, { { 0, 0 }, { 40, 0 }, { 80, 0 } }), 2, "80 hexes over three points are 2 turns")
+        -- with no road the figure is a lower bound: the longer span, not the Euclidean distance (30 by 30 is 42, which would be 2)
+        b.x, b.y = 30, 30
+        eq(F.route_turns(a.iface, b.iface), 1, "30 by 30 with no road: the longer span of 30 is one turn")
+        b.x, b.y = 0, 80
+        eq(F.route_turns(a.iface, b.iface), 2, "80 along y with no road: two turns, the y span counts")
+        b.x, b.y = 80, 0
+        a.held.grain = grain
+    end
     local runtime = DERPY_MR_TERRAIN_ROUTES
     local road = {{0,0},{0,20},{40,20},{80,20},{80,0}}
     DERPY_MR_TERRAIN_ROUTES = {journey=function() return road end}
     local s=F.ship(buyer.iface,a.iface,b.iface,"grain",400)
+    eq(s.duration, 3, "the detour is 120 hexes: 3 turns")
     eq(s.road,road,"new shipment saves its solved road")
     eq(s.x,0,"cargo starts on the road"); eq(s.y,0,"cargo starts at its first point")
     DERPY_MR_TERRAIN_ROUTES = runtime
@@ -3312,7 +4337,14 @@ end)()
     F.drop(s); F.set_stock_policy(buyer.name,"grain","keep","auto")
     local o=F.route_create(buyer.iface,a.key,b.key,"grain",150,50)
     eq(o~=nil,true,"internal named order created")
+    a.absent={grain=true}; local _,ready=F.route_status(buyer.iface,o); a.absent=nil
+    eq(ready,"Ready","an own-faction order needs no price, so no pool at the source")
+    local own_gold=buyer.iface:treasury()
     F.routes_turn(buyer.iface); eq(#F.ships(),1,"recurring internal dispatch")
+    local mine=F.ships()[1]
+    eq(mine.sender,nil,"an own-faction cart is no contract"); eq(mine.escrow,nil,"and reserves no gold")
+    eq(mine.price_c,nil,"and carries no price"); eq(o.last_price_c,nil,"and the order shows no last price")
+    eq(buyer.iface:treasury(),own_gold,"and the buyer pays nothing")
     eq(F.ships()[1].gross,50,"order batch cap")
     F.routes_turn(buyer.iface); eq(#F.ships(),1,"once per order per turn")
     TURN=TURN+1; F.routes_turn(buyer.iface); eq(#F.ships(),2,"next turn sends toward net target")
@@ -3320,11 +4352,18 @@ end)()
     while #F.ships()>0 do F.drop(F.ships()[1]) end
     b.held.grain=0
     local contract=F.route_create(buyer.iface,c.key,b.key,"grain",70,100)
-    eq(contract.price,DERPY_MR_FLOWS_SELL_RATE.provisions,"ordinary price locked")
+    eq(contract.price,nil,"no price locked at creation")
     local bg,sg=buyer.iface:treasury(),seller.iface:treasury()
+    local quoted=F.buy_price(F.local_price(F.stock_view(seller.iface,c.iface),"grain",seller.name))
+    local shown=F.quote(seller.iface,c.iface,"grain").buy
     TURN=TURN+1; F.routes_turn(buyer.iface); local cart=F.ships()[1]
+    local first=cart
     eq(cart.n,70,"net target after loss")
-    eq(cart.escrow,70*contract.price,"escrow is delivered-unit maximum")
+    eq(cart.price_c,quoted,"origin's buy price at dispatch")
+    eq(cart.price_c,110,"one gold base at a half-full store, plus the 10% spread")
+    eq(shown,cart.price_c,"the price the panel offers is the price the cart is charged")
+    eq(contract.last_price_c,cart.price_c,"shown as the last price paid")
+    eq(cart.escrow,F.gold(70,cart.price_c),"escrow is whole gold for the delivered-unit maximum")
     eq(buyer.iface:treasury(),bg-cart.escrow,"buyer charged once")
     eq(seller.iface:treasury(),sg,"seller unpaid before arrival")
     eq(F.incoming(buyer.name,b.key,"grain"),70,"recipient reservation")
@@ -3332,14 +4371,52 @@ end)()
     local snapshot=copy(F.state); F.state=copy(snapshot)
     contract=F.routes(buyer.iface)[1]
     F.routes_turn(buyer.iface); eq(#F.ships(),1,"reload cannot redispatch same turn")
-    cart=F.ships()[1]; b.held.grain=980; TURN=cart.due
+    cart=F.ships()[1]; b.held.grain=983; TURN=cart.due
     F.arrive(buyer.iface,cart)
     eq(b.held.grain,1000,"partial arrival fits actual free space")
-    eq(seller.iface:treasury(),sg+20*contract.price,"pay only credited cargo")
-    eq(buyer.iface:treasury(),bg-20*contract.price,"refund undelivered units")
+    local pay=F.gold(17,cart.price_c)
+    eq(pay,18,"17 units at 1.10 pay 18 whole gold")
+    eq(seller.iface:treasury(),sg+pay,"pay only credited cargo")
+    eq(buyer.iface:treasury(),bg-pay,"refund undelivered units")
+    eq(pay+(buyer.iface:treasury()-(bg-cart.escrow)),cart.escrow,"pay and refund account for the whole escrow")
     F.arrive(buyer.iface,cart); F.drop(cart)
-    F.route_settle(cart,20)
-    eq(seller.iface:treasury(),sg+20*contract.price,"settlement idempotent")
+    F.route_settle(cart,17)
+    eq(seller.iface:treasury(),sg+pay,"settlement idempotent")
+    local keep=c.held.grain; c.held.grain=1000; b.held.grain=0; TURN=TURN+1; F.routes_turn(buyer.iface)
+    local full=F.ships()[1]
+    eq(full.price_c<first.price_c,true,"a full origin store charges less than a half-full one")
+    F.route_return(full); c.held.grain=keep
+    c.absent={grain=true}
+    local st,why=F.route_status(buyer.iface,contract)
+    eq(st,nil,"a settlement with no pool cannot be bought from"); eq(why,"No price at the source","and the panel is told why")
+    local held=buyer.iface:treasury(); TURN=TURN+1; F.routes_turn(buyer.iface)
+    eq(#F.ships(),0,"no cart leaves without a pool"); eq(buyer.iface:treasury(),held,"and the buyer pays nothing")
+    c.absent=nil
+    local space=c.cap; c.cap=0; TURN=TURN+1; F.routes_turn(buyer.iface)
+    eq(#F.ships(),0,"a store of no capacity quotes no price, so no cart leaves")
+    eq(buyer.iface:treasury(),held,"and nothing is charged"); eq(c.held.grain,keep,"and no goods move")
+    c.cap=space
+    local purse=buyer.iface:treasury(); TREASURY[buyer.name]=(TREASURY[buyer.name] or 0)-purse+10
+    b.held.grain=0; TURN=TURN+1; F.routes_turn(buyer.iface)
+    eq(#F.ships(),0,"a cart the buyer cannot afford does not leave"); eq(buyer.iface:treasury(),10,"and no gold moves")
+    eq(c.held.grain,keep,"and no goods move"); TREASURY[buyer.name]=TREASURY[buyer.name]+purse-10
+    -- a cart worth under one gold never leaves: the seller would lose its goods for nothing
+    c.held.grain=1000; F.route_edit(buyer.iface,contract.id,"batch","2")
+    local book=F.state.contracts; local ledger={book.paid,book.refunded,book.lost}
+    local s0,b0=seller.iface:treasury(),buyer.iface:treasury()
+    TURN=TURN+1; F.routes_turn(buyer.iface)
+    eq(#F.ships(),0,"a cart worth under one gold does not leave"); eq(contract.status,"Waiting for surplus, gold or cart space","and the order says it waits")
+    eq(buyer.iface:treasury(),b0,"the buyer pays nothing"); eq(c.held.grain,1000,"and no goods move")
+    -- a cart saved before that rule, with no escrow, still goes home whole in a war and books nothing
+    F.route_edit(buyer.iface,contract.id,"batch","100"); TURN=TURN+1; F.routes_turn(buyer.iface)
+    local tiny=F.ships()[1]; TREASURY[buyer.name]=TREASURY[buyer.name]+tiny.escrow; tiny.escrow=0
+    local stock=c.held.grain; war(buyer,seller); TURN=TURN+1; F.ships_turn(buyer.iface)
+    eq(#F.ships(),0,"war returns the old cart"); eq(c.held.grain,stock+tiny.n,"and its net cargo reaches the seller")
+    buyer.war={}; seller.war={}; buyer.partners={seller}; seller.partners={buyer}
+    eq(seller.iface:treasury(),s0,"no gold reaches the seller"); eq(buyer.iface:treasury(),b0,"and none leaves the buyer")
+    eq(F.state.contracts.paid,ledger[1],"nothing is booked paid"); eq(F.state.contracts.refunded,ledger[2],"or refunded")
+    eq(F.state.contracts.lost,ledger[3],"or lost")
+    F.route_edit(buyer.iface,contract.id,"batch","100"); c.held.grain=keep
     b.held.grain=0; TURN=TURN+1; F.routes_turn(buyer.iface); cart=F.ships()[1]
     local charged=buyer.iface:treasury(); local source=c.held.grain
     war(buyer,seller); TURN=TURN+1; F.ships_turn(buyer.iface)
@@ -3351,16 +4428,34 @@ end)()
     TURN=TURN+1; F.routes_turn(buyer.iface); cart=F.ships()[1]
     seller.dead=true; F.sweep()
     eq(#F.ships(),0,"dead seller settles cargo")
-    eq(buyer.iface:treasury(),bg-20*contract.price,"dead seller refunds live buyer")
+    eq(buyer.iface:treasury(),bg-pay,"dead seller refunds live buyer")
     seller.dead=false
-    contract.price=3 -- Accepted terms stay fixed even if an optional price provider appears later.
+    -- a save from before local prices: one whole gold per unit, no price_c
+    b.held.grain=0; TURN=TURN+1; s0,b0=seller.iface:treasury(),buyer.iface:treasury()
+    F.routes_turn(buyer.iface); local aged=F.ships()[1]
+    aged.price_c,aged.price=nil,1
+    SAVED={}; cm.saving_game_callbacks[1]({}); F.state={}; cm.loading_game_callbacks[1]({})
+    whole(F.state,"contracts")
+    contract=F.routes(buyer.iface)[1]; aged=F.ships()[1]
+    eq(aged.price_c,100,"a saved cart gains its price in hundredths"); eq(aged.price,nil,"and loses the whole-gold field")
+    b.held.grain=983; TURN=aged.due; F.arrive(buyer.iface,aged)
+    eq(seller.iface:treasury(),s0+17,"a migrated cart pays whole gold for what arrived")
+    eq(buyer.iface:treasury(),b0-17,"and refunds the rest"); b.held.grain=0
+    local ships=F.state.ships; F.state.ships={{id="odd",f=buyer.name,sender=seller.name,recipient=buyer.name,escrow=5}}
+    F.sanitize_ships(); eq(F.state.ships[1].price_c,0,"a cart with escrow and no price at all pays nothing and refunds it all")
+    F.state.ships=ships
     local ex=EX; EX={sell_price=function() return 9999 end,lot=function() return 1 end,with_player=function(_,fn) fn();return true end}
+    TREASURY[buyer.name]=(TREASURY[buyer.name] or 0)+100000000
     local before=buyer.iface:treasury()
     b.held.grain=0; TURN=TURN+1
     F.set_stock_policy(buyer.name,"grain","target","70")
+    local follow=F.buy_price(F.local_price(F.stock_view(seller.iface,c.iface),"grain",seller.name))
     F.routes_turn(buyer.iface); cart=F.ships()[1]
-    eq(cart.price,3,"accepted contract price unchanged by Exchange")
-    F.trade(seller.iface); eq(b.held.grain,0,"free trade cannot duplicate committed deficit")
+    eq(cart.price_c,follow,"the origin's price follows the Exchange base")
+    eq(cart.price_c>first.price_c*1000,true,"the Exchange base replaces the fixed rate")
+    -- (the old "free trade cannot duplicate committed deficit" stood here and could not fail: this buyer's capital `a` holds
+    -- grain well over its target of 70, so F.trade never sent. The measuring case is "A CONTRACT CART ON THE ROAD IS COMMITTED
+    -- TOO" in the agreement convoys section.)
     F.route_control(buyer.iface,contract.id,"toggle")
     eq(contract.enabled,false,"pause order")
     F.route_control(buyer.iface,contract.id,"cancel")
@@ -3418,6 +4513,7 @@ end)()
     eq(F.route_covers(buyer.iface,b.key,"war"),true,"named order replaces standing category")
     F.route_control(buyer.iface,internal.id,"toggle")
     eq(F.route_covers(buyer.iface,b.key,"war"),true,"paused order still replaces standing category")
+    F.state.rates.upkeep=false   -- with upkeep on, a Garrison stocked floor would keep the iron home and hide the guard under test
     a.held.iron=100; b.held.iron=0
     local p={capital=b.iface,regions={a.iface,b.iface}}
     local carts=#F.ships()
@@ -3436,7 +4532,58 @@ end)()
     buyer.dead=false
     F.book(buyer.name).routes.bad={id="bad",target=-2}
     F.sanitize_routes(); eq(F.book(buyer.name).routes.bad,nil,"malformed saved order removed")
+    local function add_saved_order(id,extra)
+        local o={id=id,from=c.key,to=b.key,stem="grain",seller=seller.name,target=70,batch=100,enabled=true}
+        for k,v in pairs(extra) do o[k]=v end
+        F.book(buyer.name).routes[id]=o
+    end
+    add_saved_order("9001",{price=3,last_price_c=82}); add_saved_order("9002",{last_price_c=-1}); add_saved_order("9003",{last_price_c=0.5})
+    F.sanitize_routes()
+    local kept=F.book(buyer.name).routes
+    eq(kept["9001"]~=nil,true,"an old contract that still carries its locked price loads")
+    eq(kept["9001"].price,nil,"its locked price is dropped"); eq(kept["9001"].last_price_c,82,"and a whole last price is kept")
+    eq(kept["9002"].last_price_c,nil,"a negative last price is dropped"); eq(kept["9003"].last_price_c,nil,"and so is a fractional one")
     F.state,TURN=saved,turn
+end)()
+
+-- A PARTNER CART NEVER COSTS LESS THAN ITS GOODS SELL FOR WHERE THEY LAND: buying from a full partner and selling
+-- the surplus at the buyer's own store would otherwise make gold. No Exchange; luxuries are 5 gold at their base.
+;(function()
+    eq(type(F.state),"table","the contract block put the state table back")
+    local saved, turn, ex = F.state, TURN, EX
+    EX = nil
+    F.state = { factions = {}, rates = F.read_rates(), ship_seq = 95000 }
+    F.state.rates.upkeep, F.state.rates.supply, F.state.rates.army_provisions, F.state.rates.escort = false, false, false, false
+    TURN = 200000
+    local buyer = faction("floor_buyer", { human = true, gold = 10000 })
+    local seller = faction("floor_seller", { gold = 10000 })
+    local src = region("floor_src", 0, 0, 200, { silk = 200 })
+    local dst = region("floor_dst", 80, 0, 200, { silk = 110 })
+    own(seller, src, true); own(buyer, dst, true)
+    buyer.partners, seller.partners = { seller }, { buyer }
+    local function price(f, r) return F.local_price(F.stock_view(f.iface, r.iface), "silk", f.name) end
+    eq(DERPY_MR_FLOWS_SELL_RATE.luxuries, 5, "a luxury is 5 gold at its base")
+    eq(price(seller, src), 125, "the partner's full store: 25% of 5 gold"); eq(F.buy_price(125), 137, "137 to buy")
+    eq(price(buyer, dst), 460, "the buyer's store at 110 of 200: 92% of 5 gold"); eq(F.sell_price(460), 418, "it sells for 4.18")
+    local quoted = F.cart_price(seller.iface, src.iface, buyer.iface, dst.iface, "silk")
+    eq(quoted, 418, "the cart floor is what the goods sell for where they land")
+    local contract = F.route_create(buyer.iface, src.key, dst.key, "silk", 200, 100)
+    TURN = TURN + 1; F.routes_turn(buyer.iface); local cart = F.ships()[1]
+    eq(cart.price_c, 418, "the cart costs 4.18, not the partner's 1.37"); eq(cart.price_c, quoted, "as the price the panel reads says")
+    eq(contract.last_price_c, 418, "shown as the last price paid")
+    eq(cart.escrow, F.gold(cart.n, 418), "and the escrow is at that price")
+    TURN = cart.due; F.arrive(buyer.iface, cart)
+    eq(dst.held.silk > 110, true, "the cargo arrives")
+    -- the floor never lowers a price: a dear partner store still charges its own buy price
+    src.held.silk = 0; dst.held.silk = 200
+    eq(F.cart_price(seller.iface, src.iface, buyer.iface, dst.iface, "silk"), F.buy_price(price(seller, src)), "a dear source is its own buy price")
+    -- the landing price is the buyer's own: under an Exchange that prices the seller's silk at 1 gold, it would read 0.83
+    EX = { lot = function() return 1 end, subject = nil,
+           with_player = function(f, fn) EX.subject = f; local ok = pcall(fn); EX.subject = nil; return ok end,
+           sell_price = function() return EX.subject == "floor_seller" and 1 or 5 end }
+    src.held.silk, dst.held.silk = 200, 110
+    eq(F.cart_price(seller.iface, src.iface, buyer.iface, dst.iface, "silk"), 418, "the floor reads the buyer's price at its own store")
+    F.state, TURN, EX = saved, turn, ex
 end)()
 
 -- Display previews use the allocator without committing its transactions.
@@ -3480,8 +4627,9 @@ end)()
     F.trade_reach=function() return true end
     F.trade(seller.iface)
     eq(a.held.grain,19,"actual allocation agrees with preview debit")
-    eq(b.held.grain,1,"actual first partner agrees with preview")
-    eq(c.held.grain,0,"actual later partner agrees with preview")
+    eq(cargo_to(buyer.name,"grain"),1,"actual first partner agrees with preview")
+    eq(cargo_to(later.name,"grain"),0,"actual later partner agrees with preview")
+    eq(b.held.grain,0,"and nothing has landed")
     F.state,F.trade_reach,F.ships_to=state,reach,ships_to
 end)()
 

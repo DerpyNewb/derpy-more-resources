@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-24
+
+- Every store has its own price for each good: cheap when full, dear when short.
+- Selling takes from the stores with the most to spare first, each at its own price.
+- Partner contracts pay for each cart as it leaves, never less than the goods sell for where they land.
+- Agreement trade sends a good only to a partner that pays at least 10% more for it.
+- Vault: Price column, and the partner capital's price in a good's trade view.
+- Agreement goods travel the road between the two capitals as a convoy, 40 hexes a turn.
+- An army at war with the sender, within 3 hexes of a convoy, can seize it.
+- A convoy turns back if the treaty ends or the buyer dies.
+- Goods on the road count toward a partner's needs.
+- Shipments take as many turns as their road is long.
+- Trade tab: Cargo on the road row. Convoy markers on both maps.
+
 ## 2026-10-23
 
 - Carts and boats drive the trade roads, in the supplier's own style: nine kinds of cart, 23 ship styles.

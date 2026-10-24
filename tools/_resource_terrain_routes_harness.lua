@@ -501,4 +501,104 @@ R.clear()
 assert(next(R.cart_scenes)==nil and #R.traffic==0, 'cleanup left animated traffic behind')
 assert(next(R.icon_scenes)==nil,'cleanup left resource icons behind')
 assert(next(live_scenes)==nil,'cleanup left an old icon buffer or scene in the engine')
+
+-- AGREEMENT CARGO (Task 6): a convoy on the road is a cargo marker and nothing else. Its pair's line is the agreement's
+-- own, so it keeps its colour and its road while goods are in flight; the viewer's convoys and those both ends of
+-- which it can see are drawn, no one else's.
+do
+    local function convoy(over)
+        local c = { id='derpy_mr_cv_1', f='viewer', buyer='ally', from='viewer_home', to='ally_home', x=2, y=2,
+                    stem='grain', n=40, basket={grain=40,iron=12}, at=1, due=3, convoy=true }
+        for k,v in pairs(over or {}) do c[k]=v end
+        return c
+    end
+    local function seen(...)
+        local visible={}
+        for _,key in ipairs({...}) do visible[#visible+1]={name=function() return key end} end
+        faction.get_foreign_visible_regions_for_player=function() return list(visible) end
+    end
+    local convoys={}
+    verdict=true
+    DERPY_MR_FLOWS.stopped=function() return false end
+    DERPY_MR_FLOWS.mct=nil
+    local base_links,base_cargo=R.links(faction)
+    assert(#base_links==1 and #base_cargo==0,'no convoys: the agreement line and no marker, even from a flows script that has no convoy_cargo')
+    DERPY_MR_FLOWS.convoy_cargo=function() return convoys end
+    convoys={convoy()}
+    local links,cargo=R.links(faction)
+    assert(#cargo==1 and cargo[1].stem=='grain' and cargo[1].x==2 and cargo[1].y==2,'the viewer\'s own convoy is a cargo marker')
+    assert(#links==1 and links[1].path==road and links[1].owner==base_links[1].owner,
+           'a convoy adds no line and changes none: the pair keeps the road and the colour the agreement gave it')
+    assert(table.concat(links[1].goods[1],',')==table.concat(base_links[1].goods[1],',')
+        and table.concat(links[1].goods[2],',')==table.concat(base_links[1].goods[2],','),'a convoy adds no goods to its pair\'s line')
+    -- the buyer sees what is coming to it; a stranger sees only what both ends of lets it see
+    convoys={convoy({f='ally',buyer='viewer'})}
+    assert(#select(2,R.links(faction))==1,'a convoy bound for the viewer is drawn')
+    convoys={convoy({f='ally',buyer='other',from='a',to='b'})}
+    seen()
+    assert(#select(2,R.links(faction))==0,'a known faction\'s convoy between lands the viewer cannot see is not drawn')
+    seen('a','b')
+    assert(#select(2,R.links(faction))==1,'one between two visible lands is')
+    seen('a')
+    assert(#select(2,R.links(faction))==0,'one that ends in the fog is not')
+    seen('b')
+    assert(#select(2,R.links(faction))==0,'nor one that starts in it')
+    convoys={convoy({f='stranger',buyer='other',from='a',to='b'})}
+    seen('a','b')
+    assert(#select(2,R.links(faction))==0,'a faction the viewer has not met is never drawn')
+    seen()
+    -- a marker needs a place: F.convoy_cargo lists a convoy with no position (the Vault counts it), the map draws none
+    local unplaced=convoy(); unplaced.x=nil
+    convoys={unplaced}
+    assert(#select(2,R.links(faction))==0,'a convoy with no x has no place for a marker')
+    unplaced=convoy(); unplaced.y=nil
+    convoys={unplaced}
+    assert(#select(2,R.links(faction))==0,'nor one with no y')
+    -- no agreement, no line: the convoy of a pair whose trade ended is still a marker, on no line
+    convoys={convoy()}
+    local trading,allied=faction.factions_trading_with,ally.factions_trading_with
+    faction.factions_trading_with=function() return false end
+    ally.factions_trading_with=function() return false end
+    links,cargo=R.links(faction)
+    assert(#links==0 and #cargo==1,'a convoy makes no line of its own where no agreement draws one')
+    faction.factions_trading_with,ally.factions_trading_with=trading,allied
+    -- the shipments switch hides them with the shipments
+    DERPY_MR_FLOWS.mct=function(k) if k=='route_shipments' then return false end end
+    assert(#select(2,R.links(faction))==0,'hidden shipments hide convoys too')
+    DERPY_MR_FLOWS.mct=nil
+    -- on the map: one cargo scene at the convoy's spot, over the agreement's own dashes
+    local function drawn()
+        R.clear(); R.refresh()
+        local kinds={}
+        for _,p in pairs(R.scenes) do kinds[#kinds+1]=p.x..','..p.y..'='..p.scene end
+        table.sort(kinds)
+        return kinds
+    end
+    convoys={}
+    local without=drawn()
+    convoys={convoy()}
+    local with=drawn()
+    without[#without+1]='2,2=derpy_mr_route_cargo_0'
+    table.sort(without)
+    assert(table.concat(with,' ')==table.concat(without,' '),'the convoy\'s marker is one cargo scene at its spot: '..table.concat(with,' '))
+    -- THE DECAL BUDGET: 600 convoys far from the camera place no scene, the one near it still draws, and the road's dashes
+    -- are not rationed for them
+    local crowd={}
+    for i=1,600 do crowd[i]=convoy({id='derpy_mr_cv_'..i,x=5000+i,y=5000}) end
+    crowd[#crowd+1]=convoy({id='derpy_mr_cv_601'})
+    convoys=crowd
+    local crowded=drawn()
+    assert(table.concat(crowded,' ')==table.concat(with,' '),'600 far convoys must place no marker and leave the dashes alone: '..#crowded..' scenes against '..#with)
+    -- a shipment is not rationed by the camera: a far one still gets its marker
+    convoys={}
+    local kept=ships
+    ships={{f='viewer',from='a',to='b',x=5000,y=5000}}
+    local far_ship=false
+    for _,k in ipairs(drawn()) do if k=='5000,5000=derpy_mr_route_cargo_0' then far_ship=true end end
+    ships=kept
+    assert(far_ship,'a shipment far from the camera still gets its marker')
+    DERPY_MR_FLOWS.convoy_cargo=nil
+    R.clear()
+    assert(next(live_scenes)==nil,'cleanup left a convoy marker in the engine')
+end
 print('terrain routes harness ok: routing, corridor merging, rounded geometry, ordered traffic, fog and cleanup')

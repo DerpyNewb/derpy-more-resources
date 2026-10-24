@@ -183,9 +183,9 @@ eq(v.rows[1][4], "300 / 600", "space"); eq(v.rows[1][5], "2 of 3", "stored in");
 eq(v.rows[3][2], "0", "made, nothing held yet")
 S.focus = "coal"; v = S.view_model(realm)
 eq(v.title, "Where Coal is kept", "drill-down title")
-eq(v.rows[1][1], "Bravo", "by settlement"); eq(v.rows[1][2], "200 / 200", "held / space")
-eq(v.rows[1][4], "[[col:red]]Full[[/col]]", "full mark"); eq(v.rows[1].tip, S.FULL_TIP, "full tooltip")
-eq(v.rows[2][4], "", "not full")
+eq(v.rows[1][1], "Bravo", "by settlement"); eq(v.rows[1][2], "200 / 200 [[col:red]]Full[[/col]]", "held / space carries the full mark")
+eq(v.rows[1][4], "-", "no price without the flows script"); eq(v.rows[1].tip, S.FULL_TIP, "full tooltip")
+eq(v.rows[2][2], "100 / 400", "not full: no mark")
 S.view, S.focus = "settlements", nil; v = S.view_model(realm)
 eq(v.rows[2][2], "1", "Bravo level")
 -- USING (phase 4): the bundles a settlement's stores give, as icons; the row's tooltip names them
@@ -470,7 +470,8 @@ eq(holder.y, box.y, "rows follow the list"); eq(find("derpy_mr_row_1").y, box.y,
 click("derpy_mr_row_1")
 eq(find("sub_title").text, "Where Coal is kept", "drill-down title")
 eq(find_uicomponent(find("derpy_mr_row_1"), "vline3").visible, true, "a line before a column with a header")
-eq(find_uicomponent(find("derpy_mr_row_1"), "vline4").visible, false, "none before a column without one")
+eq(find_uicomponent(find("derpy_mr_row_1"), "vline4").visible, true, "a line before the Price column")
+eq(find_uicomponent(find("derpy_mr_row_1"), "vline5").visible, false, "none before a column without one")
 eq(find("hdr_line_5").visible, false, "nor in its header")
 eq(find("rows_holder").y, 220 + DERPY_MR_STORES_L.list[2], "a new list starts at the top")
 eq(shown_rows(), 2, "two settlements keep coal"); eq(cell(1, 1).text, "Bravo", "most held first")
@@ -763,6 +764,16 @@ eq(string.find(switch(4, "import").tip, "[[col:", 1, true), nil, "its Imports to
     local function pb(i, action) return find_uicomponent(find("derpy_mr_row_" .. i), "derpy_mr_policy_" .. action) end
     eq(pb(1, "plus").visible, true, "policy button visible")
     eq(pb(3, "plus").visible, false, "other row hides policy controls")
+    -- the price the trade rule reads, and a target tip that says the rule
+    local priced
+    fl.quote = function(f, r, stem) eq(r, A, "the capital's own quote"); eq(stem, "coal", "of this good"); return priced end
+    S.refresh()
+    eq(S.data[6][1], "Price at capital", "the capital's price follows the import need"); eq(S.data[6][2], "-", "no quote shows a dash")
+    priced = { price = 321 }; S.refresh()
+    eq(S.data[6][2], "3.21", "the price in gold to the hundredth")
+    eq(S.data[6].tip, "Partners send this good only while it is worth at least 10% more here than in their stores. A full store is cheap and an empty one dear.", "and its tip says the rule")
+    eq(string.find(S.data[2].tip, "Trade partners deliver toward this target at " .. S.place("reg_a")
+        .. " while it is worth at least 10% more here than in their stores. Domestic shipments use free space. Zero stops requests for this resource.", 1, true) == 1, true, "the target tip says the same")
     dump("trade_focus")
     press(pb(1, "minus")); eq(policy.keep, 100, "Auto minus rounds down to ten")
     press(pb(1, "auto")); eq(policy.keep, nil, "Auto reset")
@@ -776,7 +787,7 @@ eq(string.find(switch(4, "import").tip, "[[col:", 1, true), nil, "its Imports to
     click("derpy_mr_back"); eq(S.focus, nil, "Back returns to Trade")
     eq(pb(1, "plus").visible, false, "ordinary rows hide policy buttons")
     press(pb(1, "plus")); eq(#requests, count, "stale control cannot write")
-    fl.capital, fl.stock_view, fl.import_need, fl.request = nil, nil, nil, nil
+    fl.capital, fl.stock_view, fl.import_need, fl.request, fl.quote = nil, nil, nil, nil, nil
 end)()
 -- THE SECTION ROW FOLDS: a click hides the resources you do not have, another shows them again
 eq(find("derpy_mr_row_3").tip, S.FOLD_TIP[false], "the section row says a click hides them")
@@ -815,8 +826,21 @@ do
     -- TRADE REACH: the partners whose agreement moves nothing, and why (flows.lua F.cut_off)
     local cut = { { key = "fac_c", why = "Too far for trade" }, { key = "fac_d", why = "Cut off by enemy lands" } }
     fl.cut_off = function(f) eq(f:name(), LOCAL, "cut off from the local faction"); return cut end
+    -- CARGO ON THE ROAD (agreement convoys, flows.lua F.convoy_cargo): two of the local faction's out, one in, and a
+    -- stranger's that is neither. The listing is the flows script's, every faction's: the panel picks the viewer's.
+    CONVOYS = {
+        { id = "derpy_mr_cv_1", f = LOCAL, buyer = "fac_b", from = "reg_a", to = "reg_b", due = 12, x = 150, y = 250,
+          stem = "coal", n = 40, basket = { iron = 12, coal = 40 }, convoy = true },
+        { id = "derpy_mr_cv_2", f = LOCAL, buyer = "fac_c", from = "reg_a", to = "reg_c", due = 13, x = 120, y = 280,
+          stem = "brimstone", n = 5, basket = { brimstone = 5 }, convoy = true },
+        { id = "derpy_mr_cv_3", f = "fac_b", buyer = LOCAL, from = "reg_b", to = "reg_a", due = 14, x = 250, y = 150,
+          stem = "iron", n = 8, basket = { iron = 8, coal = 8 }, convoy = true },
+        { id = "derpy_mr_cv_4", f = "fac_c", buyer = "fac_d", from = "reg_c", to = "reg_d", due = 15, x = 900, y = 900,
+          stem = "coal", n = 99, basket = { coal = 99 }, convoy = true },
+    }
+    fl.convoy_cargo = function() return CONVOYS end
     click("derpy_mr_tab_trade")
-    dump("trade")   -- the preview draws the tab with its duty and cut-off rows (overwrites the plain dump)
+    dump("trade")   -- the preview draws the tab with its duty, cut-off and cargo rows (overwrites the plain dump)
     eq(cell(1, 1).text, "Import duty", "the duty row comes first"); eq(cell(1, 5).text, "paid 11, received 4", "both ways")
     eq(string.find(find("derpy_mr_row_1").tip, ": paid 11, received 4", 1, true) ~= nil, true, "each partner in its tooltip")
     eq(string.find(find("derpy_mr_row_1").tip, "12%", 1, true) ~= nil, true, "with the rate")
@@ -826,14 +850,61 @@ do
     eq(string.find(tip, ": Too far for trade", 1, true) ~= nil and string.find(tip, ": Cut off by enemy lands", 1, true) ~= nil,
        true, "each with why"); eq(string.find(tip, "7 turns", 1, true) ~= nil, true, "and the reach")
     eq(switch(2, "export").visible or switch(2, "import").visible, false, "no switches on it either")
-    eq(cell(3, 1).text, "Coal", "the goods follow")
+    eq(cell(3, 1).text, "Cargo on the road", "then what the convoys carry"); eq(cell(3, 5).text, "2 out, 1 in", "two out, one in, never the stranger's")
+    local cargo_tip = find("derpy_mr_row_3").tip
+    eq(string.find(cargo_tip, "From Alpha to Bravo, arrives turn 12: 40 Coal, 12 Iron", 1, true) ~= nil, true,
+       "each convoy: where from and to, when, and its basket, the most first")
+    eq(string.find(cargo_tip, "From Bravo to Alpha, arrives turn 14: 8 Coal, 8 Iron", 1, true) ~= nil, true, "the one coming in, equal amounts by name")
+    eq(string.find(cargo_tip, "arrives turn 13: 5 Brimstone", 1, true) ~= nil, true, "and the other going out")
+    eq(string.find(cargo_tip, "99 Coal", 1, true), nil, "and not a stranger's")
+    eq(find_uicomponent(find("derpy_mr_row_3"), "icon").image, DERPY_MR_STORES_L.MAP_CART, "wearing the convoy icon the Map tab's key does")
+    eq(switch(3, "export").visible or switch(3, "import").visible, false, "no switches on it either")
+    eq(cell(4, 1).text, "Coal", "the goods follow")
+    local all = CONVOYS
+    CONVOYS = { all[3] }; click("derpy_mr_tab_trade"); eq(cell(3, 5).text, "0 out, 1 in", "none out is still said")
+    CONVOYS = { all[1] }; click("derpy_mr_tab_trade"); eq(cell(3, 5).text, "1 out, 0 in", "and none in")
+    -- A CONVOY WITH NO POSITION is on the road all the same: counted and listed here, drawn on no map
+    local unplaced = { id = "derpy_mr_cv_5", f = LOCAL, buyer = "fac_b", from = "reg_a", to = "reg_b", due = 17,
+                       stem = "coal", n = 3, basket = { coal = 3 }, convoy = true }
+    CONVOYS = { unplaced }; click("derpy_mr_tab_trade")
+    eq(cell(3, 1).text, "Cargo on the road", "a convoy with no position still has its row"); eq(cell(3, 5).text, "1 out, 0 in", "and is counted")
+    eq(string.find(find("derpy_mr_row_3").tip, "From Alpha to Bravo, arrives turn 17: 3 Coal", 1, true) ~= nil, true, "and listed in the tooltip")
+    -- A BIG REALM: ten convoys out, the tooltip names the eight that land soonest and counts the rest
+    fl.SHIP = { near = 4 }   -- not the real 3: the tooltip's number is shown to come from here
+    CONVOYS = {}
+    for i = 1, 10 do
+        CONVOYS[i] = { id = "derpy_mr_cv_" .. (20 + i), f = LOCAL, buyer = "fac_b", from = "reg_a", to = "reg_b", due = 31 - i,
+                       x = 150, y = 250, stem = "coal", n = i, basket = { coal = i }, convoy = true }
+    end
+    click("derpy_mr_tab_trade")
+    local big = find("derpy_mr_row_3").tip
+    local _, shown = string.gsub(big, "arrives turn", "")
+    eq(cell(3, 5).text, "10 out, 0 in", "all ten counted"); eq(shown, 8, "eight named")
+    eq(string.find(big, "arrives turn 21: 10 Coal", 1, true) ~= nil, true, "starting with the soonest")
+    eq(string.find(big, "arrives turn 29", 1, true), nil, "the two that land last are not named")
+    eq(string.sub(big, -#"and 2 more convoys"), "and 2 more convoys", "but counted")
+    -- THE SEIZURE RULE as the flows script keeps it: the sender's enemy, near the convoy at the sender's turn start
+    eq(string.find(big, "and an army at war with the sender, within 4 hexes of it when the sender's turn begins, can seize it.", 1, true) ~= nil,
+       true, "the tooltip says who seizes it and from how near")
+    -- EQUAL TURNS LIST IN THE ORDER THE CONVOYS LEFT: by the number in the id, not its text, where "10" sorts before "9"
+    CONVOYS = {
+        { id = "derpy_mr_cv_10", f = LOCAL, buyer = "fac_b", from = "reg_a", to = "reg_b", due = 20, x = 150, y = 250,
+          stem = "iron", n = 6, basket = { iron = 6 }, convoy = true },
+        { id = "derpy_mr_cv_9", f = LOCAL, buyer = "fac_b", from = "reg_a", to = "reg_b", due = 20, x = 150, y = 250,
+          stem = "brimstone", n = 5, basket = { brimstone = 5 }, convoy = true },
+    }
+    click("derpy_mr_tab_trade")
+    local tied = find("derpy_mr_row_3").tip
+    eq(string.find(tied, "5 Brimstone", 1, true) < string.find(tied, "6 Iron", 1, true), true, "convoy 9 is listed before convoy 10")
+    CONVOYS = {}; click("derpy_mr_tab_trade"); eq(cell(3, 1).text, "Coal", "nothing on the road, no row")
+    fl.convoy_cargo = nil; click("derpy_mr_tab_trade"); eq(cell(3, 1).text, "Coal", "a flows script without convoy_cargo: no row, no error")
     cut = { cut[1] }; click("derpy_mr_tab_trade"); eq(cell(2, 5).text, "1 partner", "one is one partner")
     cut = {}; click("derpy_mr_tab_trade"); eq(cell(2, 1).text, "Coal", "nobody cut off, no row")
     fl.duty_last = function() return nil end; click("derpy_mr_tab_trade")
     eq(cell(1, 5).text, "paid 0, received 0", "nothing booked yet reads as nothing")
     stores = false; click("derpy_mr_tab_trade"); eq(cell(1, 1).text, "Coal", "no row for a faction that never pays it")
     stores, pct = true, 0; click("derpy_mr_tab_trade"); eq(cell(1, 1).text, "Coal", "no row while the duty is off")
-    fl.rates, fl.duty_last, fl.uses_stores, fl.cut_off = nil, nil, nil, nil; click("derpy_mr_tab_trade")
+    fl.rates, fl.duty_last, fl.uses_stores, fl.cut_off, fl.SHIP = nil, nil, nil, nil, nil; click("derpy_mr_tab_trade")
 end
 -- ALL AT ONCE: four buttons under the list, on the Trade tab only
 local function bulk(dir, mode) return find("derpy_mr_all_" .. dir .. "_" .. mode) end
@@ -887,6 +958,7 @@ CAPS, SHIPS = {}, {}
 DERPY_MR_FLOWS = {
     capitals = function(f) eq(f:name(), LOCAL, "the local faction's capitals"); return CAPS end,
     ships = function() return SHIPS end,
+    convoy_cargo = function() return CONVOYS end,
     rates = function() return { actions = ACT_ON, supply = SUP_ON } end,
     SHIP = { turns = 2 },
     ship_count = function(fk) eq(fk, LOCAL, "the local faction's shipments"); return SHIP_N end,
@@ -942,7 +1014,7 @@ end
 
 eq(sendb(1).x, find("derpy_mr_row_1").x + LL.VIEWS.focus[5][1], "in the fifth column")
 eq(sendb(1).disabled, false, "live when something can come"); eq(sendb(1).shader, "normal_t0", "and drawn live")
-eq(sendb(1).tip, "Ship 12 Coal from Bravo: 10 arrive in 2 turns, 2 are lost on the way. An army at war "
+eq(sendb(1).tip, "Ship 12 Coal from Bravo: 10 arrive in at least 2 turns, 2 are lost on the way. An army at war "
    .. "with you can seize it on the road.", "the tooltip says what happens")
 eq(sendb(2).disabled, true, "Brimstone: nobody can send it"); eq(sendb(2).shader, "set_greyscale_t0", "and it looks it")
 eq(sendb(2).tip, "No other settlement of yours can send Brimstone.", "the tooltip says why")
@@ -1176,6 +1248,16 @@ for i = 0, 29 do FAR[#FAR + 1] = { 2000 + 10 * i, 100 } end
 local MINE = { owner = LOCAL, from = "reg_b", to = "reg_a", own = true }
 local THEIRS = { owner = "fac_far", from = "reg_x", to = "reg_y", own = false }
 ROUTE_LINKS = { MINE, THEIRS }
+-- AGREEMENT CONVOYS (flows.lua F.convoy_cargo lists every faction's): one of the viewer's out and one in, both on the
+-- road (the points 11 and 5 of it), and a stranger's the panel must not draw. They ride after the shipment's cart.
+CONVOYS = {
+    { id = "derpy_mr_cv_1", f = LOCAL, buyer = "fac_b", from = "reg_b", to = "reg_a", due = 14, x = 190, y = 230,
+      stem = "coal", n = 40, basket = { iron = 12, coal = 40 }, convoy = true },
+    { id = "derpy_mr_cv_2", f = "fac_b", buyer = LOCAL, from = "reg_b", to = "reg_a", due = 15, x = 250, y = 170,
+      stem = "iron", n = 8, basket = { iron = 8 }, convoy = true },
+    { id = "derpy_mr_cv_3", f = "fac_c", buyer = "fac_d", from = "reg_c", to = "reg_d", due = 16, x = 290, y = 110,
+      stem = "coal", n = 99, basket = { coal = 99 }, convoy = true },
+}
 DERPY_MR_TERRAIN_ROUTES = {
     links = function(f) eq(f:name(), LOCAL, "the 3D map's links, asked for the viewer"); return ROUTE_LINKS, {} end,
     path = function(a, b) return ({ reg_b = ROAD, reg_x = FAR })[a] end,
@@ -1225,6 +1307,16 @@ eq(inside(cart), true, "inside the box")
 eq(math.abs(cart.x + cart.w / 2 - (da.x + da.w / 2)) < 40, true, "near Alpha, where it is now")
 eq(string.find(cart.tip, "22 Coal from Bravo to Alpha", 1, true) ~= nil, true, "what it carries, from and to")
 eq(string.find(cart.tip, "turn 52", 1, true) ~= nil, true, "and when it arrives")
+-- the viewer's convoys, out and in, each a cart after the shipment's; the stranger's is not drawn
+local out_cart, in_cart = mapc("cart", 2), mapc("cart", 3)
+eq(out_cart.visible and in_cart.visible, true, "a cart for the convoy going out and one for the convoy coming in")
+eq(mapc("cart", 4) == false or mapc("cart", 4).visible == false, true, "and none for a stranger's convoy")
+eq(out_cart.shader, "glow_pulse_t0", "pulsing, like any convoy on the road")
+eq(inside(out_cart) and inside(in_cart), true, "both inside the box")
+eq(string.find(out_cart.tip, "40 Coal, 12 Iron from Bravo to Alpha, arriving on turn 14.", 1, true) ~= nil, true,
+   "the tooltip lists the basket, the most first, with where from and to and when")
+eq(string.find(in_cart.tip, "8 Iron from Bravo to Alpha, arriving on turn 15.", 1, true) ~= nil, true, "the one coming in too")
+eq(out_cart.x > cart.x and out_cart.y > cart.y, true, "the convoy is further along the road from Alpha to Bravo than the shipment, east and south")
 local function road(colour, each)
     local n, i = 0, 1
     while mapc("path" .. colour, i) do
@@ -1276,6 +1368,20 @@ local surface = find("derpy_mr_map_art")
 road(1, function(c)
     eq(c.x >= surface.x and c.x + c.w <= surface.x + surface.w, true, "the plain map's surface carries the far road, so a drag reaches it")
 end)
+-- A CONVOY FAR FROM THE REALM (an incoming one starts at the partner's capital) rides the surface and stays out of the frame
+do
+    local listed = CONVOYS
+    CONVOYS = { listed[1], listed[2], listed[3],
+                { id = "derpy_mr_cv_9", f = "fac_far", buyer = LOCAL, from = "reg_x", to = "reg_a", due = 18, x = 2100, y = 100,
+                  stem = "coal", n = 5, basket = { coal = 5 }, convoy = true } }
+    click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+    eq(mapc("dot", 2).x - mapc("dot", 1).x, gap0, "framed on the realm: a far incoming convoy does not shrink it")
+    local far = mapc("cart", 4)
+    eq(far.visible, true, "though its cart is drawn")
+    eq(far.x >= surface.x and far.x + far.w <= surface.x + surface.w, true, "on the surface, so a drag reaches it")
+    CONVOYS = listed
+    click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+end
 -- no path yet (still being worked out, or none at all): nothing, never a straight line instead
 local solved = DERPY_MR_TERRAIN_ROUTES.path
 DERPY_MR_TERRAIN_ROUTES.path = function() return nil end
@@ -1293,6 +1399,59 @@ press(cart)
 eq(CAMERA[1], 110 * 2, "a click on the cart flies the camera to it"); eq(CAMERA[2], 290 * 2, "both co-ordinates")
 eq(find("derpy_mr_stores_panel").visible, false, "and closes the panel")
 click("derpy_mr_stores_button"); click("derpy_mr_tab_map")
+press(mapc("cart", 2)); eq(CAMERA[1], 190 * 2, "a click on a convoy flies the camera to it"); eq(CAMERA[2], 230 * 2, "both co-ordinates")
+click("derpy_mr_stores_button"); click("derpy_mr_tab_map")
+-- A CONVOY WITH NO POSITION is on the road but has no place for a cart (the Trade tab counts it). The stub's
+-- log_to_dis tolerates the nil here, as the engine's does not, so it is the rule that is measured and not the throw.
+do
+    local real, listed = cm.log_to_dis, CONVOYS
+    CONVOYS = { listed[1], { id = "derpy_mr_cv_4", f = LOCAL, buyer = "fac_b", from = "reg_a", to = "reg_b", due = 17,
+                              stem = "coal", n = 3, basket = { coal = 3 }, convoy = true } }
+    cm.log_to_dis = function(_, x, y) return (x or 0) * 2, (y or 0) * 2 end
+    click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+    eq(mapc("cart", 2).visible, true, "the convoy with a position is drawn")
+    eq(mapc("cart", 3).visible, false, "the one with no position is not")
+    cm.log_to_dis, CONVOYS = real, listed
+    click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+end
+-- CONVOYS ON ONE SPOT SHARE A CART (a one-turn convoy waits at its exporter's capital): twenty at Alpha are one cart on its
+-- dot, and its tooltip names the eight that land soonest and counts the rest
+do
+    local listed = CONVOYS
+    CONVOYS = {}
+    for i = 1, 20 do
+        CONVOYS[i] = { id = "derpy_mr_cv_" .. (40 + i), f = LOCAL, buyer = "fac_b", from = "reg_a", to = "reg_b", due = 20 + i,
+                       x = 100, y = 300, stem = "coal", n = i, basket = { coal = i }, convoy = true }
+    end
+    click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+    local stack = mapc("cart", 2)
+    eq(stack.visible, true, "a cart for the twenty convoys"); eq(mapc("cart", 3).visible, false, "and no second one")
+    eq(math.abs(stack.x + stack.w / 2 - (da.x + da.w / 2)) <= 1 and math.abs(stack.y + stack.h / 2 - (da.y + da.h / 2)) <= 1, true,
+       "on the capital where they stand")
+    local _, named = string.gsub(stack.tip, "arrives turn", "")
+    eq(named, 8, "its tooltip names eight")
+    eq(string.find(stack.tip, "arrives turn 21: 1 Coal", 1, true) ~= nil, true, "the soonest first")
+    eq(string.sub(stack.tip, -#"and 12 more convoys"), "and 12 more convoys", "and counts the other twelve")
+    -- a convoy somewhere else keeps its own cart and its own tooltip
+    CONVOYS[21] = listed[1]
+    click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+    eq(mapc("cart", 3).visible, true, "a convoy on another spot has a cart of its own")
+    eq(string.find(mapc("cart", 3).tip, "40 Coal, 12 Iron from Bravo to Alpha, arriving on turn 14.", 1, true) ~= nil, true,
+       "with the tooltip a lone convoy has")
+    press(mapc("cart", 2)); eq(CAMERA[1], 100 * 2, "a click on the stack flies the camera to it"); eq(CAMERA[2], 300 * 2, "both co-ordinates")
+    CONVOYS = listed
+    click("derpy_mr_stores_button"); click("derpy_mr_tab_map")
+end
+-- the 3D map's shipments switch hides convoys with the shipments: no carts at all on the Map tab
+do
+    local fl = DERPY_MR_FLOWS
+    fl.mct = function(k) if k == "route_shipments" then return false end end
+    click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+    eq(mapc("cart", 1).visible or mapc("cart", 2).visible or mapc("cart", 3).visible, false, "the shipments switch is off: no shipment, no convoy")
+    fl.mct = nil
+    click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
+    eq(mapc("cart", 1).visible and mapc("cart", 2).visible and mapc("cart", 3).visible, true, "and on again")
+end
 press(mapc("dot", 2)); eq(CAMERA[1], 300 * 2, "a click on a settlement flies there too")
 click("derpy_mr_stores_button"); click("derpy_mr_tab_map")
 -- NAMES THAT WOULD COLLIDE ARE DROPPED, capitals kept first; the dot and its tooltip stay
@@ -1527,7 +1686,7 @@ RADAR_OFF, S.frame = false, nil
 -- TWO SETTLEMENTS CLOSE TOGETHER BY THE MAP'S SOUTH EDGE: zoomed only as far as the picture has
 -- detail for, and the view kept on the picture rather than showing the blank below it
 POS.reg_a, POS.reg_b = { 600, 30 }, { 612, 22 }
-local ships0, links0 = SHIPS, ROUTE_LINKS; SHIPS, ROUTE_LINKS = {}, {}
+local ships0, links0, convoys0 = SHIPS, ROUTE_LINKS, CONVOYS; SHIPS, ROUTE_LINKS, CONVOYS = {}, {}, {}
 CAMPAIGN = "wh3_main_combi"; S.frame = nil; click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
 local ea, eclip = art(), find("derpy_mr_map_clip")
 eq(ea.w, 1440 * LL.MAP_ART_ZOOM, "a tight cluster is drawn at the closest zoom, no closer")
@@ -1535,14 +1694,14 @@ eq(ea.y + ea.h >= eclip.y + eclip.h, true, "and the picture still reaches the bo
 eq(ea.y + ea.h - (eclip.y + eclip.h) <= 1, true, "its own foot on the box's: the view went no further south")
 on_place(ea, mapc("dot", 2), "reg_b", "by the edge, Bravo")
 POS.reg_a, POS.reg_b = { 100, 300 }, { 300, 100 }
-SHIPS, ROUTE_LINKS = ships0, links0; S.frame = nil
+SHIPS, ROUTE_LINKS, CONVOYS = ships0, links0, convoys0; S.frame = nil
 CAMPAIGN = "some_mod_map"; click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
 eq(art().images[0], S.NO_ART, "back on an unknown map, the picture goes")
 CAMPAIGN = "wh3_main_combi"; click("derpy_mr_tab_goods")
 eq(find("derpy_mr_map_clip").visible, false, "and off the Map tab")
 CAMPAIGN = "some_mod_map"
 -- a single settlement and no convoy: framed on that one, nothing stretched to a point
-FACTIONS.fac_a = faction("fac_a", { A }); SHIPS = {}
+FACTIONS.fac_a = faction("fac_a", { A }); SHIPS, CONVOYS = {}, {}
 click("derpy_mr_tab_goods"); click("derpy_mr_tab_map")
 eq(mapc("dot", 1).visible, true, "one settlement still draws"); eq(inside(mapc("dot", 1)), true, "inside the box")
 eq(mapc("dot", 2).visible, false, "the second dot is hidden, not left behind")
@@ -1593,16 +1752,16 @@ press(fest); eq(REQ[1], "fac_a|order|festival", "a click buys it")
 press(act("derpy_mr_order_muster")); eq(#REQ, 1, "a greyed order asks for nothing")
 eq(act("derpy_mr_sell").visible, false, "no Sell on the Spending tab")
 -- SELL, on a resource's drill-down
-SALE = { n = 120, gold = 840, price = 7 }
+SALE = { n = 120, gold = 840, price = 700 }
 click("derpy_mr_tab_goods"); click("derpy_mr_row_1"); eq(find("sub_title").text, "Where Coal is kept", "Coal's drill-down")
 local sell = act("derpy_mr_sell")
 eq(sell.visible, true, "a Sell button"); eq(sell.text, "Sell surplus", "labelled"); eq(sell.x, slot(4), "in slot 4")
-eq(sell.tip, "Sell 120 Coal for 840 gold: what your stores hold above half their space.", "priced in its tooltip")
+eq(sell.tip, "Sell 120 Coal for 840 gold, 7.00 each: what your stores hold above half their space.", "priced in its tooltip")
 eq(act("derpy_mr_order_festival").visible, false, "no orders on a drill-down")
 press(sell); eq(REQ[2], "fac_a|sell|coal", "a click sells it")
 SALE = nil; click("derpy_mr_back"); click("derpy_mr_row_1")
 eq(act("derpy_mr_sell").disabled, true, "nothing to sell: greyed")
-eq(act("derpy_mr_sell").tip, "Nothing to sell: your stores of Coal are no more than half full.", "and says why")
+eq(act("derpy_mr_sell").tip, "Nothing to sell: your stores of Coal hold no more than half their space, or what is over would not fetch a whole gold.", "and says why")
 press(act("derpy_mr_sell")); eq(#REQ, 2, "a greyed Sell asks for nothing")
 -- FOUNDING (spec 2026-10-09): a row above the goods of a region no slot offers its rare building in
 ;(function()
@@ -2034,7 +2193,11 @@ end
 do
     local fl, view, focus = DERPY_MR_FLOWS, S.view, S.focus
     local prior_local=LOCAL; LOCAL="fac_a"
-    local order={id="77",from="reg_b",to="reg_a",stem="coal",seller=LOCAL,target=100,batch=100,enabled=true,price=3}
+    eq(S.money(75),"0.75","hundredths read as gold"); eq(S.money(1483),"14.83","more than a gold")
+    eq(S.money(300),"3.00","whole gold keeps its zeros"); eq(S.money(5),"0.05","a hundredth is padded")
+    local order={id="77",from="reg_b",to="reg_a",stem="coal",seller=LOCAL,target=100,batch=100,enabled=true}
+    local NEXT_CART=157   -- what F.cart_price answers: the partner's price or the buyer's own store's, whichever is more
+    local CART_ARGS
     local f=FACTIONS[LOCAL]
     local partners=f.factions_trading_with
     local regions=f.region_list
@@ -2045,23 +2208,54 @@ do
     end,routes=function() return {order} end, ships=function() return {} end,
     GOOD={coal={use="war"}}, SELL_RATE={war=3}, owned=function(_,key) if key=="reg_a" then return A end end,
     stock_view=function(_,r) return {region=r,held={coal=200},capacity={coal=400}} end,
-    available_stock=function(v) return v.region==B and 200 or 0 end, route_status=function() return {} end,
+    available_stock=function(v) return v.region==B and 200 or 0 end,
+    route_status=function() return {seller="t_seller",from="t_from",to="t_to"} end,
+    cart_price=function(...) CART_ARGS={...}; return NEXT_CART end,
     route_turns=function() return 3 end,free=function() return 300 end}
     S.view,S.focus="spending","route:77"; S.refresh()
     eq(S.view_key(),"trade_focus","order editor uses rule columns")
     eq(S.data[2].route,"77","target row identifies saved order")
+    eq(S.data[4][1],"Internal transfer: no gold","an own-faction order carries no price")
+    eq(S.data[5][1],"Gold currently in escrow","and no last-cart row")
     local n=#REQ
     press(find_uicomponent(find("derpy_mr_row_2"),"derpy_mr_policy_plus"))
     eq(REQ[#REQ],LOCAL.."|route_edit|77|target|110","target button reaches synchronized door")
     press(sendb(6)); eq(REQ[#REQ],LOCAL.."|route_ctl|77|toggle","pause button requests correct action")
     press(sendb(7)); eq(REQ[#REQ],LOCAL.."|route_ctl|77|cancel","cancel button requests correct action")
     dump("route")
+    order.seller="fac_p"; order.last_price_c=82; S.refresh()
+    eq(S.data[4][1],"Price per delivered unit","a partner order is priced per delivered unit")
+    eq(S.data[4][2],"0.82","at the last cart's price, in gold to the hundredth")
+    local WHY="Each cart costs the seller's price plus 10% when it leaves, or what the goods would sell for at your store if that is more. Shows the last cart's price. Next cart: "
+    eq(S.data[4].tip,WHY.."1.57.","and the tip says what it costs and what the next cart will")
+    eq(CART_ARGS[1],"t_seller","the next cart is priced for the order's seller"); eq(CART_ARGS[2],"t_from","from its source")
+    eq(CART_ARGS[3]:name(),LOCAL,"for the buyer"); eq(CART_ARGS[4],"t_to","into its destination"); eq(CART_ARGS[5],"coal","in its good")
+    NEXT_CART=nil; S.refresh()
+    eq(S.data[4].tip,WHY.."-.","a cart with no price shows a dash"); NEXT_CART=157; S.refresh()
+    eq(S.data[5][1],"Gold currently in escrow","in one row, not two")
+    dump("route_partner")
+    order.last_price_c=nil; S.refresh()
+    eq(S.data[4][2],"Set per cart","no price to show before the first cart")
+    order.seller=LOCAL
     order.from="reg_c"
     S.view,S.focus="settlements","routes:reg_a:coal"; S.refresh()
-    eq(S.data[1][3],"3 turns","offer displays actual saved-duration calculator")
+    eq(S.data[1][3],"at least 3 turns","offer displays the calculator's figure as a least: no road is searched for a panel")
+    eq(string.find(S.data[1].tip,"by the length of its road",1,true)~=nil,true,"and the tip says a cart takes its road's length")
+    eq(string.find(S.data[1].tip,"coordinate distance",1,true),nil,"and no longer says the straight line decides")
     press(sendb(1))
     eq(REQ[#REQ],LOCAL.."|route_new|reg_b|reg_a|coal|100|100","Create button requests explicit recurring terms")
     dump("route_offer")
+    f.factions_trading_with=function() return list({faction("fac_p",{B})}) end
+    NEXT_CART=1483
+    S.refresh()
+    eq(S.data[1][4],"Internal","an own-faction offer needs no gold")
+    eq(S.data[2][4],"14.83","a partner's offer shows what a cart costs")
+    eq(CART_ARGS[1]:name(),"fac_p","priced for the partner selling"); eq(CART_ARGS[2]:name(),"reg_b","from its store")
+    eq(CART_ARGS[3]:name(),LOCAL,"for the buyer"); eq(CART_ARGS[4]:name(),"reg_a","into the buyer's store"); eq(CART_ARGS[5],"coal","in that good")
+    eq(string.find(S.data[2].tip,"Each cart costs the seller's price plus 10% when it leaves, or what the goods would sell for at your store if that is more.",1,true)~=nil,true,"and says what that is")
+    eq(string.find(S.data[2].tip,"fixed price",1,true),nil,"and no longer calls it fixed")
+    NEXT_CART=nil; S.refresh()
+    eq(S.data[2][4],"-","a cart with no price shows no price")
     while #REQ>n do table.remove(REQ) end
     f.factions_trading_with=partners
     f.region_list=regions
@@ -2107,5 +2301,76 @@ do
     CHARS[8]=nil;CHARS[7]=old7;cm.get_campaign_ui_manager=selected;DERPY_MR_FLOWS=fl
     army:Destroy()
 end
+-- LOCAL PRICES: a Price column on both drill-downs, its sentence on the row's tooltip, the full
+-- mark moved into Held / Space, and the Sell tooltip listing each store's lot
+;(function()   -- a function of its own: the main chunk is at Lua's 200-local limit
+    local fl, view, focus = DERPY_MR_FLOWS, S.view, S.focus
+    local f, regions = FACTIONS[LOCAL], FACTIONS[LOCAL].region_list
+    f.region_list = function() return list({ C, B, A }) end
+    local CHEAP = { price = 75, mult = 25, base = 300, buy = 82, sell = 68, cover = 20 }
+    local DEAR = { price = 525, mult = 175, base = 300, buy = 577, sell = 477, fullness = 25 }
+    local FAIR = { price = 300, mult = 100, base = 300, buy = 330, sell = 272, cover = 1 }
+    local lots = { { region = "reg_b", from = B, n = 150, price = 68 }, { region = "reg_a", from = A, n = 30, price = 40 } }
+    local BAD = false   -- Iron's quote with neither cover nor fullness, which no real quote lacks
+    DERPY_MR_FLOWS = {
+        rates = function() return { actions = true } end, request = function() end,
+        owned = function(_, key) return ({ reg_a = A, reg_b = B })[key] end,
+        quote = function(f, r, stem)
+            eq(f:name(), LOCAL, "the local faction's quote")
+            if stem == "coal" then return r:name() == "reg_b" and CHEAP or DEAR end
+            if stem == "iron" and BAD then return { price = 75, mult = 25, base = 300, buy = 82, sell = 68 } end
+        end,
+        sale = function() return { n = 180, gold = 114, price = 63, lots = lots } end,
+        series = function() return { 3, 4, 5 }, { 0, 50, 100 } end, last = function() return { made = 12 } end,
+    }
+    local function has(text, part) return string.find(text, part, 1, true) ~= nil end
+    local PRICE = "Price 0.75 (25% of 3.00). 20 turns of war materials in store, cheap here. Buyers pay 0.82, sellers get 0.68."
+    eq(S.price_tip(CHEAP, "war"), PRICE, "stock cover, below 100, counted over the category")
+    eq(S.price_tip(DEAR, "war"), "Price 5.25 (175% of 3.00). Store 25% full, dear here. Buyers pay 5.77, sellers get 4.77.", "fullness, above 100")
+    eq(S.price_tip(FAIR, "war"), "Price 3.00 (100% of 3.00). 1 turn of war materials in store, fair price. Buyers pay 3.30, sellers get 2.72.", "at 100")
+    eq(S.price_tip(CHEAP, "provisions"), "Price 0.75 (25% of 3.00). 20 turns of provisions in store, cheap here. Buyers pay 0.82, sellers get 0.68.", "each category by its own word")
+    eq(S.use_of("coal"), "war", "a good's use comes from the goods list")
+    -- a settlement's stores: Bravo's coal is full and cheap, its iron has no price
+    S.view = "settlements"; S.show(true, "reg_b")
+    eq(find("hdr_4").text, "Price", "the settlement view's fourth header")
+    local coal, iron
+    for _, r in ipairs(S.data) do if r.stem == "coal" then coal = r elseif r.stem == "iron" then iron = r end end
+    eq(coal[2], "200 / 200 [[col:red]]Full[[/col]]", "a full store keeps its mark in Held / Space")
+    eq(coal[4], "0.75", "the price in gold to the hundredth"); eq(cell(1, 4).text, "0.75", "drawn in the fourth cell")
+    eq(has(coal.tip, PRICE), true, "the tooltip carries the price sentence"); eq(has(coal.tip, "cheap here"), true, "cheap here")
+    eq(has(coal.tip, S.FULL_TIP), true, "and still says the store is full")
+    eq(iron[2], "50 / 200", "not full: no mark"); eq(iron[4], "-", "a good with no quote shows a dash")
+    eq(has(iron.tip, "Price"), false, "and no price sentence")
+    eq(find("hdr_4").halign, "right", "the Price head is right-aligned like the figures before it")
+    eq(cell(1, 4).halign, "right", "and so is its cell"); eq(cell(1, 3).halign, "right", "as Per turn is")
+    dump("settlement_focus")   -- the preview draws Bravo with its prices (overwrites Alpha's plain dump)
+    -- a quote the sentence cannot be built from: the price still shows, with no sentence, and no error
+    BAD = true; S.refresh()
+    for _, r in ipairs(S.data) do if r.stem == "iron" then iron = r end end
+    eq(iron[4], "0.75", "a malformed quote still gives its price"); eq(has(iron.tip, "Price"), false, "and no sentence")
+    eq(#ERRORS, 0, "and raises nothing"); BAD = false
+    -- a good's drill-down: a row a settlement, each with its own price
+    S.view = "goods"; S.show(true, "coal")
+    eq(find("hdr_4").text, "Price", "the good drill-down's fourth header")
+    eq(S.data[1][1], "Bravo", "most held first"); eq(S.data[1][2], "200 / 200 [[col:red]]Full[[/col]]", "the full mark in Held / Space")
+    eq(S.data[1][4], "0.75", "Bravo's price"); eq(S.data[2][4], "5.25", "Alpha's price")
+    eq(has(S.data[1].tip, S.FULL_TIP), true, "Bravo's tooltip still says full"); eq(has(S.data[1].tip, "cheap here"), true, "and cheap")
+    eq(has(S.data[2].tip, "Store 25% full, dear here."), true, "Alpha's says dear")
+    eq(find("derpy_mr_sell").tip, "Sell 180 Coal for 114 gold, 0.63 each: what your stores hold above half their space."
+        .. "\n150 from Bravo at 0.68\n30 from Alpha at 0.40", "the Sell tooltip lists each store's lot")
+    eq(find("hdr_4").halign, "right", "the drill-down's Price head too"); eq(cell(1, 4).halign, "right", "and its cell")
+    -- THE SELL TOOLTIP names at most 8 stores and counts the rest
+    local many, want = {}, "Sell 55 Coal for 100 gold, 1.81 each: what your stores hold above half their space."
+    for i = 1, 10 do many[i] = { region = "reg_" .. i, n = i, price = i } end
+    for i = 1, 8 do want = want .. string.format("\n%d from reg_%d at 0.%02d", i, i, i) end
+    eq(S.sell_tip({ n = 55, gold = 100, price = 181, lots = many }, "Coal"), want .. "\nand 2 more stores", "ten lots: eight lines and a count")
+    many[10] = nil
+    eq(S.sell_tip({ n = 55, gold = 100, price = 181, lots = many }, "Coal"), want .. "\nand 1 more store", "nine lots: the count is singular")
+    many[9] = nil
+    eq(S.sell_tip({ n = 55, gold = 100, price = 181, lots = many }, "Coal"), want, "eight lots: all named, no count")
+    dump("goods_focus")   -- the preview draws the drill-down with prices and the chart (overwrites the plain dump)
+    DERPY_MR_FLOWS, S.view, S.focus, f.region_list = fl, view, focus, regions
+    S.show(false)
+end)()
 eq(#ERRORS, 0, "script errors: " .. table.concat(ERRORS, "; "))
 print("harness ok")
