@@ -153,7 +153,7 @@ def assets():
     pen.ellipse((left, top, left + 2 * cap, bottom), fill=white)
     pen.ellipse((right - 2 * cap, top, right, bottom), fill=white)
     for stem, image in (('cargo', Image.open(io.BytesIO(cargo)).convert('RGBA')), ('dash', dash)):
-        out['vfx/textures/derpy_mr_route_' + stem + '.dds'] = campaign_particle_dds(image.resize((128, 128), Image.Resampling.LANCZOS))
+        out['vfx/textures/derpy_mr_route_' + stem + '.dds'] = campaign_particle_dds(image)
     combined = ET.Element('vfx', **native.find('vfx').attrib)
     for tag in ('emitters', 'behaviour_chains', 'effect_render_stacks'):
         ET.SubElement(combined, tag)
@@ -258,7 +258,7 @@ def icon_assets(native):
         key='derpy_mr_cart_icon_'+stem
         staged=ROOT/'Modding Files/pack'/path
         png=staged.read_bytes() if staged.exists() else db._unwrap(read(GAME/'ui.pack',path)[0][2])
-        out['vfx/textures/'+key+'.dds']=campaign_particle_dds(Image.open(io.BytesIO(png)).convert('RGBA').resize((128,128)))
+        out['vfx/textures/'+key+'.dds']=campaign_particle_dds(Image.open(io.BytesIO(png)).convert('RGBA'))
         effect=ET.Element('vfx',revision='2',construction_type='1',enable_in_ted='false',camera_following='false',ref_spawn_speed='-1.00')
         for container,tag in (('emitters','emitter'),('behaviour_chains','behaviour_chain'),('effect_render_stacks','effect_render_stack')):
             child=copy.deepcopy(native.find('.//'+tag+'[@id="quest_beam"]'))
@@ -305,15 +305,20 @@ def cart_asset():
     return (OUT / 'route_cart.csc').read_bytes()
 
 
+PARTICLE_PX = 512
+
+
 def campaign_particle_dds(image):
     # All 93 diffuse textures CA's campaign vfx libraries reference are BC7_UNORM_SRGB with full mips.
-    # One DXT5 texture on a campaign chain turns every CA smoke/ember/magic particle on the map into a flat
-    # quad at campaign load (2026-10-22 bisection: CA's own bytes under our name were clean; ours were not).
+    # Below PARTICLE_PX our pixels show up inside CA's own particles (braziers, magic, the Hell-Forge panel's
+    # fire) as flat squares from campaign load. 2026-10-25, same images: 128 and 256 broken, 512 and 1024 clean.
+    # The 2026-10-22 "DXT5 is the cause" fix was wrong; every texture since was 128 px and still broke it.
     import subprocess
     import tempfile
+    from PIL import Image
     with tempfile.TemporaryDirectory() as tmp:
         png = Path(tmp) / 'texture.png'
-        image.save(png)
+        image.resize((PARTICLE_PX, PARTICLE_PX), Image.Resampling.LANCZOS).save(png)
         subprocess.run([str(ROOT / 'texconv/texconv.exe'), '-nologo', '-y', '-ft', 'dds', '-f', 'BC7_UNORM_SRGB',
                         '-srgb', '-m', '0', '-o', tmp, str(png)], check=True, capture_output=True)
         return next(p for p in Path(tmp).iterdir() if p.suffix.lower() == '.dds').read_bytes()
@@ -444,7 +449,7 @@ def selftest():
         if name.endswith('.dds'):
             width, height, mips, dxgi = dds_header(b)
             assert dxgi == 99, name + ' must be BC7_UNORM_SRGB like every CA campaign particle texture'
-            assert width == height >= 64 and width & (width - 1) == 0 and mips == width.bit_length(), (name, width, height, mips)
+            assert width == height >= PARTICLE_PX and width & (width - 1) == 0 and mips == width.bit_length(), (name, width, height, mips)
         elif name.startswith('composite_scene/derpy_mr_route_cart'):
             assert b'\x04\x00free' not in b and b'map_zero_y_to_terrain' in b
             assert b'ANIMATION_ELEMENT' not in b and b'SFX_ELEMENT' not in b and b'linear' in b

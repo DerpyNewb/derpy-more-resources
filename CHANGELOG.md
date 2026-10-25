@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-25
+
+- Fixed: braziers, magic and the Hell-Forge fire drew as flat squares with the mod on.
+
 ## 2026-10-24
 
 - Every store has its own price for each good: cheap when full, dear when short.
