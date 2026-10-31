@@ -9,7 +9,7 @@ import gen_resource_overhaul as goods
 
 def check():
     source=Path(ui.ROOT,'Modding Files/source/resource_overhaul/stores_panel.lua').read_text()
-    start=source.index('function S.economy_rows(')
+    start=source.index('S.BUNDLE_ICONS = ')   # the labels come from S.economy_cells, above economy_rows
     end=source.index("\n-- A SHIPMENT'S ESCORT",start)
     definitions=goods.economy_definitions()
     expected={'halls':'+2 control','records':'+5 growth','tea':'+2 control',

@@ -932,7 +932,7 @@ eq(switch(1, "export").images[0], S.CHECK[true][1], "ticked again")
 local saved_view, saved_focus = S.view, S.focus
 local alpha_realm = S.read_realm(FACTIONS.fac_a)
 for _, vf in ipairs({ { "goods" }, { "goods", "coal" }, { "settlements" }, { "settlements", "reg_a" }, { "trade" },
-                     { "spending" }, { "map" } }) do
+                     { "spending" }, { "map" }, { "production" } }) do
     S.view, S.focus = vf[1], vf[2]
     local v = S.view_model(alpha_realm)
     -- the sub-title and the hint share one line: together they must fit it
@@ -1010,6 +1010,180 @@ do
     table.remove(REQ)
     fl.economy_rows, fl.owned = nil, owned_before
     S.refresh()
+end
+-- A RECIPE'S STATE, the word both views show: the economy's own verdict, never a guess
+eq(S.economy_status({ on = true, open = true, paid = true }), "Paid", "paid this turn")
+eq(S.economy_status({ on = true, open = true, ready = true }), "Next turn", "will pay next turn")
+eq(S.economy_status({ on = true, open = true, ready = false, short = "Short of iron" }), "Short", "on but short")
+eq(S.economy_status({ on = true, open = true, ready = false, short = "Output store full" }), "Store full", "nowhere to put it")
+eq(S.economy_status({ on = false, open = true, ready = true }), "Off", "not ordered")
+eq(S.economy_status({ on = false, open = false, reason = "Needs an undamaged workshop" }), "No workshop", "cannot run here")
+eq(S.economy_status({ on = true, open = false, reason = "Province capital only" }), "Capital only", "ordered, can no longer run")
+eq(S.economy_status({ on = true, open = false, reason = "a reason nobody wrote a word for" }), "Paused", "an unknown reason, ordered")
+
+-- THE PRODUCTION TAB (asked 2026-10-30): a section per recipe, the settlements that can run it under
+-- it. The world is the hardest the economy hands it: two inputs short where admission names only the
+-- first, a recipe left on where it can no longer run, a recipe no settlement can run, and a service
+-- in three settlements.
+do
+    local fl = DERPY_MR_FLOWS
+    local saved = { owned = fl.owned, economy_rows = fl.economy_rows, economy_view = fl.economy_view,
+                    available_stock = fl.available_stock, race = fl.race }
+    for k, v in pairs({ tools = "Tools", timber = "Timber", cloth = "Cloth", leather = "Leather", medicine = "Medicine" }) do
+        LOC["pooled_resources_display_name_derpy_mr_store_" .. k] = v
+    end
+    LOC.building_culture_variants_name_wh3_dlc23_chd_tower_furnace_1 = "Cinerator"
+    LOC.building_culture_variants_name_wh3_dlc23_chd_tower_furnace_2 = "Great Cinerator"
+    LOC.building_culture_variants_name_wh3_dlc23_chd_factory_assembly_line_1 = "Gunsmith"
+    LOC.building_culture_variants_name_wh_main_dwf_industry_1 = "Trinket Maker"
+    local TOOLS = { label = "Toolmaking", kind = "processing", cost = { iron = 6, timber = 2 }, output = { "tools", 8 } }
+    local POWDER = { label = "Powder mixing", kind = "processing", cost = { brimstone = 4, coal = 8 },
+                     output = { "blackpowder", 8 },
+                     levels = { wh3_dlc23_chd_tower_furnace_1 = true, wh3_dlc23_chd_tower_furnace_2 = true,
+                                wh3_dlc23_chd_factory_assembly_line_1 = true, wh_main_dwf_industry_1 = true } }
+    local BUILD = { label = "Builders' yards", kind = "services", cost = { tools = 2, cloth = 1 }, value = -5,
+                    benefit = "Province construction cost -5%", effect = "wh_main_effect_building_construction_cost_mod_all",
+                    icon = "construction.png" }
+    local MESS = { label = "Factory mess", kind = "services", cost = { salted_meat = 3, beer = 2 }, value = 2,
+                   benefit = "Province control +2", effect = "wh_main_effect_public_order_events",
+                   icon = "public_order_happy.png" }
+    local HOSP = { label = "Field hospitals", kind = "services", cost = { cloth = 2, leather = 1, medicine = 1 }, value = 3,
+                   benefit = "Own armies in the province: replenishment +3%",
+                   effect = "wh_main_effect_force_all_campaign_replenishment_rate", icon = "replenishment.png" }
+    local WORKSHOP, CAPITAL = "Needs an undamaged workshop", "Province capital only"
+    local function st(key, d, t) t.key, t.definition = key, d; return t end
+    -- what F.economy_rows hands back for each settlement, in its own key order
+    local ROWS = {
+        reg_a = { st("builders", BUILD, { open = true, on = true, paid = true, ready = true }),
+                  st("hospital", HOSP, { open = true, on = false, ready = true }),
+                  st("mess", MESS, { open = true, on = false, ready = true }),
+                  st("powder", POWDER, { open = false, on = false, reason = WORKSHOP }),
+                  st("toolmaking", TOOLS, { open = true, on = true, ready = false, short = "Short of iron" }) },
+        reg_b = { st("builders", BUILD, { open = true, on = false, ready = false, short = "Short of cloth" }),
+                  st("hospital", HOSP, { open = true, on = true, ready = false, short = "Short of cloth" }),
+                  st("mess", MESS, { open = true, on = false, ready = true }),
+                  st("powder", POWDER, { open = false, on = false, reason = WORKSHOP }),
+                  st("toolmaking", TOOLS, { open = false, on = false, reason = WORKSHOP }) },
+        reg_c = { st("builders", BUILD, { open = false, on = false, reason = CAPITAL }),
+                  st("hospital", HOSP, { open = false, on = false, reason = CAPITAL }),
+                  st("mess", MESS, { open = false, on = true, reason = CAPITAL }),
+                  st("powder", POWDER, { open = false, on = false, reason = WORKSHOP }),
+                  st("toolmaking", TOOLS, { open = false, on = false, reason = WORKSHOP }) },
+    }
+    -- what each settlement can spend: Bravo is short of cloth AND leather, admission names cloth
+    local HAVE = { reg_a = { iron = 3, timber = 9, tools = 4, cloth = 3, leather = 1, medicine = 1, beer = 2, salted_meat = 3 },
+                   reg_b = { tools = 2, cloth = 0, leather = 0, medicine = 5, beer = 2, salted_meat = 3 },
+                   reg_c = { beer = 9 } }
+    local VIEWS_ASKED = 0
+    local fac_before = FACTIONS.fac_a
+    FACTIONS.fac_a = faction("fac_a", { C, B, A })
+    fl.owned = function(_f, key) return ({ reg_a = A, reg_b = B, reg_c = C })[key] end
+    fl.economy_rows = function(f, region) eq(f:name(), LOCAL, "the local faction's recipes"); return ROWS[region:name()] end
+    fl.economy_view = function(_f, region, d)
+        VIEWS_ASKED = VIEWS_ASKED + 1
+        eq(type(d.cost), "table", "the view is asked for a recipe")
+        return { rk = region:name() }
+    end
+    fl.available_stock = function(v, stem) return HAVE[v.rk][stem] or 0 end
+    fl.race = function() return "chd" end
+    click("derpy_mr_tab_production")
+    local tab = find("derpy_mr_tab_production")
+    eq(tab.text, "Production", "the tab is labelled")
+    tab:SetState("hover"); eq(tab:GetStateText(), "Production", "and keeps it on hover"); tab:SetState("standard")
+    eq(lit("derpy_mr_tab_production"), SEL, "the open tab is lit"); eq(lit("derpy_mr_tab_workshop"), OFF, "the Workshop is not")
+    eq(find("sub_title").text, "What your settlements can make", "the tab's title")
+    eq(find("derpy_mr_back").visible, false, "no Back: the tab has no drill-down")
+    local D = S.data
+    eq(#D, 14, "five recipes, each a section, and their settlements")
+    -- processing first, then services, each by name; every section folds
+    local sections = {}
+    for i, r in ipairs(D) do if r.section then sections[#sections + 1] = i .. ":" .. r[1] end end
+    eq(table.concat(sections, ","), table.concat({ "1:" .. S.section("Powder mixing"), "3:" .. S.section("Toolmaking"),
+        "5:" .. S.section("Builders' yards"), "8:" .. S.section("Factory mess"), "12:" .. S.section("Field hospitals") }, ","),
+        "the sections, in order")
+    eq(D[3].fold, "prod_toolmaking", "a section folds by its recipe")
+    -- A RECIPE NO SETTLEMENT CAN RUN: one grey row saying why, naming the race's own buildings
+    eq(D[2][1], S.grey("None of your settlements"), "nobody can run powder"); eq(D[2][4], S.grey("No workshop"), "and why")
+    eq(D[2].send, nil, "nothing to enable"); eq(D[2].dim, true, "greyed")
+    eq(string.find(D[2].tip, "Buildings that run it: Cinerator, Gunsmith.", 1, true) ~= nil, true, "names what to build")
+    eq(string.find(D[2].tip, "Trinket Maker", 1, true), nil, "not another race's building")
+    eq(string.find(D[2].tip, "Great Cinerator", 1, true), nil, "and only a chain's first level")
+    eq(D[2].price[1].short and D[2].price[2].short, true, "its inputs drawn greyed")
+    -- Toolmaking: only Alpha can run it; it is on and short of iron
+    eq(D[4][1], "Alpha", "where it runs"); eq(D[4][2], "8 Tools", "what it gives"); eq(D[4][4], "Short", "on, short")
+    eq(D[4].price[1].text, "[[col:red]]6[[/col]]", "iron is red"); eq(D[4].price[2].text, "2", "timber is not")
+    eq(D[4].price[1].icon, S.icon_of("iron"), "each input after its icon")
+    eq(string.find(D[4].tip, "Alpha can spend 3 of the 6 Iron a batch takes.", 1, true) ~= nil, true, "the tooltip says how short")
+    eq(string.find(D[4].tip, "Short of", 1, true), nil, "and does not say it twice")
+    eq(D[4].send.label, "Pause", "it can be paused"); eq(D[4].send.off, false, "live")
+    eq(D[6][1] .. "|" .. D[6][4] .. "|" .. D[6][2], "Alpha|Paid|-5% cost", "a paid service")
+    eq(D[7][1] .. "|" .. D[7][4] .. "|" .. D[7].send.label, "Bravo|Off|Enable", "a service that can be enabled")
+    eq(D[11][1], "Charlie", "a service left on where it can no longer run is still listed")
+    eq(D[11][4], "Capital only", "saying why"); eq(D[11].send.label .. tostring(D[11].send.off), "Pausefalse", "and can be paused")
+    eq(string.find(D[11].tip, "Province capital only", 1, true) ~= nil, true, "the tooltip gives the reason")
+    -- BRAVO'S HOSPITAL: admission stopped at cloth; leather is short too, medicine is not
+    eq(D[14][1] .. "|" .. D[14][4], "Bravo|Short", "short")
+    eq(tostring(D[14].price[1].short) .. tostring(D[14].price[2].short) .. tostring(D[14].price[3].short), "truetruefalse",
+       "cloth and leather red, medicine not")
+    eq(VIEWS_ASKED, 8, "a view for each listed row, none for one that cannot run")
+    -- ON SCREEN: the inputs from column 3, PRICE_PITCH apart; a third icon only where there is a third input
+    local PC, r4, r14 = LL.VIEWS.production, find("derpy_mr_row_4"), find("derpy_mr_row_14")
+    local u1, u2 = find_uicomponent(r4, "use1"), find_uicomponent(r4, "use2")
+    eq(u1.visible and u1.x == r4.x + PC[3][1], true, "the first input at column 3")
+    eq(u2.x - u1.x, LL.PRICE_PITCH, "the second after it")
+    eq(find_uicomponent(r4, "pn1").text, "[[col:red]]6[[/col]]", "the short amount on screen")
+    -- GIVES AFTER ITS ICON: the slot after the inputs', at column 2, the text moved past it
+    local g4, g14 = find_uicomponent(r4, "use3"), find_uicomponent(r14, "use4")
+    eq((D[4].lead or {})[2], S.icon_of("tools"), "a good's own icon")
+    eq((D[6].lead or {})[2], "ui/campaign ui/effect_bundles/construction.png", "a service's, its bundle's")
+    eq(g4.visible and g4.x == r4.x + PC[2][1] and g4.image == S.icon_of("tools"), true, "Tools' icon before 8 Tools")
+    eq(find_uicomponent(r4, "pn3").visible, false, "and no amount after it")
+    eq(find_uicomponent(r4, "c2").x, r4.x + PC[2][1] + LL.ICON_PITCH, "the text after the icon")
+    eq(find_uicomponent(r14, "use3").visible and find_uicomponent(r14, "use3").x == r14.x + PC[3][1] + 2 * LL.PRICE_PITCH,
+       true, "three inputs, three icons")
+    eq(g14.visible and g14.x == r14.x + PC[2][1] and g14.image == "ui/campaign ui/effect_bundles/replenishment.png", true,
+       "and the fourth slot is Gives'")
+    eq(g4.shader, "normal_t0", "drawn live")
+    local g2 = find_uicomponent(find("derpy_mr_row_2"), "use3")
+    eq(g2.visible and g2.shader == "set_greyscale_t0", true, "greyed on the row nobody can run")
+    eq(find_uicomponent(r4, "c4").x, r4.x + PC[4][1], "the state in column 4")
+    eq(sendb(4).visible and sendb(4).x == r4.x + PC[5][1], true, "Pause in the fifth column")
+    eq(sendb(2).visible, false, "no button on a recipe nobody can run")
+    dump("production")
+    local n = #REQ
+    press(sendb(7))
+    eq(REQ[#REQ], LOCAL .. "|economy|reg_b|builders", "Enable goes through the request door, naming the settlement")
+    eq(#REQ, n + 1, "one click, one request"); table.remove(REQ)
+    press(sendb(2)); eq(#REQ, n, "the grey row sends nothing")
+    -- FOLDING a section hides its settlements and keeps the others
+    click("derpy_mr_row_3")
+    eq(#S.data, 13, "Toolmaking folded"); eq(S.data[4][1], S.section("Builders' yards"), "the next section moves up")
+    eq(S.data[3].folded, true, "drawn folded")
+    click("derpy_mr_row_3"); eq(#S.data, 14, "and back")
+    -- WITH THE ACTIONS OFF the list still shows, its buttons greyed saying why
+    ACT_ON = false; S.refresh()
+    eq(S.data[4].send.off, true, "greyed"); eq(S.data[4].send.tip, S.WORK_OFF, "saying why")
+    press(sendb(4)); eq(#REQ, n, "and sends nothing"); ACT_ON = true
+    -- AN OLDER FLOWS SCRIPT WITHOUT THE VIEW: admission's own shortage still shows
+    fl.economy_view = nil; S.refresh()
+    eq(tostring(S.data[14].price[1].short) .. tostring(S.data[14].price[2].short), "truefalse", "the one admission named")
+    eq(string.find(S.data[14].tip, "Short of Cloth", 1, true) ~= nil, true, "and the tooltip says it")
+    -- NOTHING TO SHOW
+    fl.economy_rows = function() return {} end; S.refresh()
+    eq(#S.data, 0, "a race with no recipes"); eq(find("empty_text").text, S.NO_RECIPES, "says so")
+    eq(find("empty_text").visible, true, "shown")
+    eq(S.view_model({}).empty, S.NO_REALM, "no settlements says that instead")
+    eq(#ERRORS, 0, "no error on the Production tab")
+    fl.owned, fl.economy_rows, fl.economy_view = saved.owned, saved.economy_rows, saved.economy_view
+    fl.available_stock, fl.race = saved.available_stock, saved.race
+    FACTIONS.fac_a = fac_before
+    for k in pairs(LOC) do
+        if string.find(k, "^building_culture_variants_name_") then LOC[k] = nil end
+    end
+    for _, k in ipairs({ "tools", "timber", "cloth", "leather", "medicine" }) do
+        LOC["pooled_resources_display_name_derpy_mr_store_" .. k] = nil
+    end
+    click("derpy_mr_tab_settlements"); click("derpy_mr_row_1")
 end
 
 eq(sendb(1).x, find("derpy_mr_row_1").x + LL.VIEWS.focus[5][1], "in the fifth column")

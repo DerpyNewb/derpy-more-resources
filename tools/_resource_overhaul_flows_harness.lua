@@ -559,6 +559,8 @@ tA2.held.coal, tA1.held.coal = 80, 140
 F.trade(tA.iface)
 eq(tA1.held.coal, 138, "smaller raw store with removable stock wins")
 eq(tA2.held.coal, 80, "protected store left alone")
+F.set_stock_policy("tA", "coal", "keep", "130")
+F.trade(tA.iface); eq(tA1.held.coal, 137, "8 spare: 5% floors to none, and at least 1 goes")
 -- Snapshot failures cannot suppress model exports.
 hum.partners = { tB }; h1.held = { salt = 100 }; tB1.held.salt = 0
 F.set_stock_policy("tB", "salt", "target", "20")
@@ -797,9 +799,12 @@ do
         open=false; why='enemy'
         DERPY_MR_TERRAIN_ROUTES.queue={{key='stale'}}
         DERPY_MR_TERRAIN_ROUTES.cache={stale=true}
+        local epoch = DERPY_MR_TERRAIN_ROUTES.epoch or 0
         fire(event,{region=function() return rA1.iface end})
         eq(#DERPY_MR_TERRAIN_ROUTES.queue,0,'discard obsolete queued paths')
-        eq(next(DERPY_MR_TERRAIN_ROUTES.cache),nil,'discard obsolete visual roads')
+        -- the map checks its roads again (R.path) and keeps the old line up until then (2026-10-29)
+        eq(DERPY_MR_TERRAIN_ROUTES.cache.stale,true,'the old line stays up until its road is checked')
+        eq(DERPY_MR_TERRAIN_ROUTES.epoch,epoch+1,event..' has the map check its roads again')
         eq(F.trade_reach(rA.iface,rB.iface,'peek'),nil,event..' invalidates the displayed road')
         eq(F.trade_reach(rA.iface,rB.iface),false,event..' recomputes reach within this turn')
         open=true;why=nil
@@ -1392,6 +1397,18 @@ eq(a1.held.coal, 300, "and sells nothing")
 F.state.rates.actions = false
 l1.held.coal = 190; F.request("lP", "sell", "coal"); eq(TREASURY.lP, 133, "switched off: no sale")
 F.request("lP", "export", "coal"); eq(F.stopped("lP", "export", "coal"), true, "but trade switches still work")
+-- THE MAP'S CART GOODS come from kept trade previews (terrain_routes.lua R.plans): a player's action has them
+-- worked out again on the map's next tick, not when that seller's renewal comes round (2026-10-30)
+local routes = DERPY_MR_TERRAIN_ROUTES
+DERPY_MR_TERRAIN_ROUTES = { plans = { lP = {} }, dirty = false }
+F.request("lP", "import", "iron")
+eq(next(DERPY_MR_TERRAIN_ROUTES.plans), nil, "a trade switch left the map's cart goods as they were")
+eq(DERPY_MR_TERRAIN_ROUTES.dirty, true, "a trade switch waited for the map's timer")
+F.request("lP", "import", "iron")
+DERPY_MR_TERRAIN_ROUTES.plans, DERPY_MR_TERRAIN_ROUTES.dirty = { ai1 = {} }, false
+F.dispatch("ai1", { "sell", "coal" })
+eq(DERPY_MR_TERRAIN_ROUTES.dirty, false, "a computer-run faction's request redrew the map")
+DERPY_MR_TERRAIN_ROUTES = routes
 F.state.rates.actions = true
 eq(#ERRORS, 0, "no script errors in the actions")
 
@@ -3937,6 +3954,51 @@ end)()
     F.book(brewer.name).stock = { beer = { target = 0 } } -- retained policy if a human faction becomes AI
     TURN = TURN + 1; F.economy_turn(brewer.iface)
     eq(br.held.grain, 238, "zero output target pauses AI processing")
+    -- WORKSHOP INPUTS: a computer brewery without grain gets a cart from its farm, and then brews.
+    F.state.ship_seq = 20000
+    local miller = faction("economy_ai_miller", { sc = "wh_main_sc_dwf_dwarfs" })
+    local mb = region("economy_ai_mill_brewery", 90500, 0, 400, { beer = 0 })
+    local mf = region("economy_ai_mill_farm", 90510, 0, 400, { grain = 300 })
+    own(miller, mb, true); own(miller, mf); mb.iface.slot_list = r.iface.slot_list
+    TURN = TURN + 1; F.economy_turn(miller.iface)
+    eq(mb.held.beer, 0, "a brewery without grain brews nothing")
+    F.book(miller.name).stock = { beer = { target = 0 } }
+    F.economy_supply(miller.iface); eq(#F.ships(), 0, "no cart for an output nobody wants")
+    F.book(miller.name).stock = nil
+    F.state.rates.processing = false
+    F.economy_supply(miller.iface); eq(#F.ships(), 0, "no cart with processing off")
+    F.state.rates.processing = true
+    miller.human = true
+    F.economy_supply(miller.iface); eq(#F.ships(), 0, "a player's workshop gets no cart")
+    miller.human = false
+    -- two batches are 24 grain past the brewery's own 10 food reserve; 44 at the farm delivers 30
+    mf.held.grain = 44
+    F.economy_supply(miller.iface); eq(#F.ships(), 0, "a store that cannot cover two batches sends nothing")
+    mf.held.grain = 300
+    F.economy_supply(miller.iface)
+    local cart = F.ships()[1]
+    eq(cart and cart.to .. "/" .. cart.stem, mb.key .. "/grain", "the short grain gets a cart to the brewery")
+    eq(cart.n, 90, "a full cart, filled past two batches")
+    F.economy_supply(miller.iface); eq(#F.ships(), 1, "one cart at a time")
+    TURN = cart.due; F.ships_turn(miller.iface); F.economy_turn(miller.iface)
+    eq(mb.held.beer, 8, "the delivered grain brews")
+    -- A recipe whose second input no store can spare gets no cart for the first.
+    F.state.ships = {}
+    local baker = faction("economy_ai_baker", { sc = "wh_main_sc_dwf_dwarfs" })
+    local bb = region("economy_ai_bakery", 90600, 0, 400, {})
+    local bf = region("economy_ai_bake_farm", 90610, 0, 400, { grain = 300 })
+    own(baker, bb, true); own(baker, bf)
+    bb.iface.slot_list = function() return list({ { has_building = function() return true end,
+        building = function() return { name = function() return "wh_main_dwf_farm_1" end,
+            percent_health = function() return 100 end } end } }) end
+    F.economy_supply(baker.iface); eq(#F.ships(), 0, "no salt anywhere: no grain cart either")
+    bf.held.salt = 50
+    F.economy_supply(baker.iface)
+    eq(#F.ships() == 1 and F.ships()[1].stem, "grain", "with salt to spare, the grain goes first")
+    -- and it runs at every computer turn start
+    F.state.ships = {}; mb.held = { beer = 0 }; TURN = TURN + 1
+    turn_start(miller)
+    eq(#F.ships() == 1 and F.ships()[1].to, mb.key, "a computer's turn start sends the cart")
     F.state.rates.ai = false; TURN = TURN + 1; ar.held.beer = 20; ar.held.pipeweed = 10
     F.economy_turn(ai.iface); eq(ar.held.beer, 20, "AI master switch honored")
     print("economy: 9 recipes, 8 services, refusal/rollback, reserves, save/reload, requests and AI budgets pass")
@@ -4622,13 +4684,13 @@ end)()
     a.held.grain=20; seller.partners={later,buyer}
     local goods=F.trade(seller.iface,true)
     eq(goods[buyer.name][1],"grain","first alphabetical partner gets one unit")
-    eq(#(goods[later.name] or {}),0,"later partner cannot reuse surplus below rounding threshold")
+    eq((goods[later.name] or {})[1],"grain","later partner gets at least 1 of the 19 left")
     eq(a.held.grain,20,"ordered preview never debits the real sender")
     F.trade_reach=function() return true end
     F.trade(seller.iface)
-    eq(a.held.grain,19,"actual allocation agrees with preview debit")
+    eq(a.held.grain,18,"actual allocation agrees with preview debit")
     eq(cargo_to(buyer.name,"grain"),1,"actual first partner agrees with preview")
-    eq(cargo_to(later.name,"grain"),0,"actual later partner agrees with preview")
+    eq(cargo_to(later.name,"grain"),1,"actual later partner agrees with preview")
     eq(b.held.grain,0,"and nothing has landed")
     F.state,F.trade_reach,F.ships_to=state,reach,ships_to
 end)()

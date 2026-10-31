@@ -862,6 +862,8 @@ function S.view_model(realm)
         elseif S.focus then S.escort_view(v) else S.spending(v) end
     elseif S.view == "workshop" then
         S.workshop(v, realm)
+    elseif S.view == "production" then
+        S.production(v, realm)
     elseif S.view == "map" then
         v.title = "Where your settlements and convoys are"
         v.heads = { "", "", "", "", "" }
@@ -990,41 +992,180 @@ function S.icon_of(stem)
     end
 end
 
+S.BUNDLE_ICONS = "ui/campaign ui/effect_bundles/"
+S.SERVICE_UNITS = {
+    wh_main_effect_public_order_events = " control",
+    wh_main_effect_province_growth_events = " growth",
+    wh_main_effect_building_construction_cost_mod_all = "% cost",
+    wh_main_effect_force_all_campaign_replenishment_rate = "% replen.",
+}
+-- WHY A RECIPE CANNOT RUN, by flows.lua F.economy_open's reason: a word for the State column, and
+-- the sentence a recipe no settlement can run says it with
+S.ECON_CLOSED = { ["Needs an undamaged workshop"] = "No workshop", ["Province capital only"] = "Capital only",
+                  ["Disabled for this campaign"] = "Switched off" }
+S.ECON_WHY = { ["Needs an undamaged workshop"] = "None of your settlements has an undamaged building that runs this.",
+               ["Province capital only"] = "It runs only in a province capital, and you hold none.",
+               ["Disabled for this campaign"] = "Switched off in the mod's settings for this campaign." }
+
+-- A RECIPE'S STATE in a word: the economy's own admission check (flows.lua F.economy_state)
+function S.economy_status(st)
+    if st.on and st.paid then return "Paid" end
+    if not st.open then return S.ECON_CLOSED[st.reason] or (st.on and "Paused" or "Off") end
+    if not st.on then return "Off" end
+    if st.ready then return "Next turn" end
+    return st.short == "Output store full" and "Store full" or "Short"
+end
+
+-- One recipe as the settlement's stores and the Production tab both show it.
+function S.economy_cells(st)
+    local d, parts, stems, amounts = st.definition, {}, {}, {}
+    for stem in pairs(d.cost) do stems[#stems + 1] = stem end
+    table.sort(stems)
+    for _, stem in ipairs(stems) do
+        parts[#parts + 1] = S.num(d.cost[stem]) .. " " .. S.name(stem)
+        amounts[#amounts + 1] = S.num(d.cost[stem])
+    end
+    local result = d.output and (S.num(d.output[2]) .. " " .. S.name(d.output[1])) or d.benefit
+    local reason = st.reason or st.short or ""
+    for _, stem in ipairs(stems) do reason = string.gsub(reason, stem, S.name(stem)) end
+    local unit = S.SERVICE_UNITS[d.effect]
+    return {
+        stems = stems, reason = reason,
+        amount = table.concat(amounts, " + ") .. (d.output and " / batch" or " / turn"),
+        head = d.label .. "\n" .. (d.output and "Additional batch: " or "Service each turn: ")
+            .. table.concat(parts, ", ") .. " -> " .. result .. ".",
+        note = d.output and "\nPassive building production is unchanged. Full batches only; Keep is respected."
+            or "\nPaid locally after essential upkeep. An unpaid service gives no bonus.",
+        benefit = d.output and (S.num(d.output[2]) .. " made") or
+            (unit and ((d.value > 0 and "+" or "") .. S.num(d.value) .. unit) or d.benefit),
+        -- realm-wide the good has to be named: the Production tab's Gives, after the good's icon or
+        -- the one the service's own bonus carries (gen_resource_overhaul.SERVICES)
+        gives = d.output and result or (unit and ((d.value > 0 and "+" or "") .. S.num(d.value) .. unit) or d.benefit),
+        gives_icon = d.output and S.icon_of(d.output[1]) or (d.icon and S.BUNDLE_ICONS .. d.icon) or nil,
+    }
+end
+
 function S.economy_rows(v, faction, region)
     local rows = S.ask("economy_rows", faction, region) or {}
     if #rows == 0 then return end
-    local service_units = {
-        wh_main_effect_public_order_events = " control",
-        wh_main_effect_province_growth_events = " growth",
-        wh_main_effect_building_construction_cost_mod_all = "% cost",
-        wh_main_effect_force_all_campaign_replenishment_rate = "% replen.",
-    }
     v.rows[#v.rows + 1] = { S.section("Processing and services"), S.section("Inputs"), S.section("State"), S.section("Benefit"), "", section = true }
     for _, st in ipairs(rows) do
-        local d, parts, stems, amounts = st.definition, {}, {}, {}
-        for stem in pairs(d.cost) do stems[#stems + 1] = stem end
-        table.sort(stems)
-        for _, stem in ipairs(stems) do
-            parts[#parts + 1] = S.num(d.cost[stem]) .. " " .. S.name(stem)
-            amounts[#amounts + 1] = S.num(d.cost[stem])
-        end
-        local cost = table.concat(parts, ", ")
-        local result = d.output and (S.num(d.output[2]) .. " " .. S.name(d.output[1])) or d.benefit
-        local status = st.on and (st.paid and "Paid" or (st.ready and "Next turn" or "Paused")) or "Off"
-        local reason = st.reason or st.short or ""
-        for _, stem in ipairs(stems) do reason = string.gsub(reason, stem, S.name(stem)) end
-        local tip = d.label .. "\n" .. (d.output and "Additional batch: " or "Service each turn: ")
-            .. cost .. " -> " .. result .. ".\n" .. reason
-            .. (d.output and "\nPassive building production is unchanged. Full batches only; Keep is respected."
-                or "\nPaid locally after essential upkeep. An unpaid service gives no bonus.")
-        local amount = table.concat(amounts, " + ") .. (d.output and " / batch" or " / turn")
-        local unit = service_units[d.effect]
-        local benefit = d.output and (S.num(d.output[2]) .. " made") or
-            (unit and ((d.value > 0 and "+" or "") .. S.num(d.value) .. unit) or d.benefit)
-        v.rows[#v.rows + 1] = { d.label, amount, status, benefit, "", economy = st.key, region = region:name(),
-            tip = tip, send = { label = st.on and "Pause" or "Enable", off = not st.open and not st.on, tip = tip } }
+        local c = S.economy_cells(st)
+        local tip = c.head .. "\n" .. c.reason .. c.note
+        v.rows[#v.rows + 1] = { st.definition.label, c.amount, S.economy_status(st), c.benefit, "", economy = st.key,
+            region = region:name(), tip = tip,
+            send = { label = st.on and "Pause" or "Enable", off = not st.open and not st.on, tip = tip } }
     end
     v.rows[#v.rows + 1] = { S.section("Stored resources"), "", "", "", "", section = true }
+end
+
+-- THE PRODUCTION TAB (asked 2026-10-30): every recipe your race has, a section each, and under it
+-- the settlements that can run it. State and Enable/Pause are the settlement view's own; an input
+-- is red where that settlement cannot spend a batch's worth of it, by the view the economy's
+-- admission check reads (flows.lua F.economy_view and F.available_stock).
+S.PROD_FOLD = "prod_"
+S.NO_RECIPES = "Your race has no processing or services."
+
+-- the buildings that run a recipe for a race, by CA's name: the first level of each chain it names.
+-- ponytail: the race is read off the level's key ("_chd_"); a chain keyed without it goes unnamed.
+-- No plain-flag string.find: in game it corrupts the string library (check_lua_api.py). A race code
+-- is letters only, so it is its own pattern.
+function S.economy_buildings(d, race)
+    local names = {}
+    if not (race and d.levels and string.match(race, "^%a+$")) then return names end
+    for lk in pairs(d.levels) do
+        if string.match(lk, "_" .. race .. "_") and string.match(lk, "_1$") then
+            local n = loc("building_culture_variants_name_" .. lk, nil)
+            if n then names[#names + 1] = n end
+        end
+    end
+    table.sort(names)
+    return names
+end
+
+function S.production_row(f, r, actions)
+    local st, d = r.st, r.st.definition
+    local c = S.economy_cells(st)
+    local view = S.ask("economy_view", f, r.region, d)
+    local row = { r.s.name, c.gives, "", S.economy_status(st), "", economy = st.key, region = r.s.key, price = {},
+                  lead = { [2] = c.gives_icon } }
+    local lines = {}
+    for k, stem in ipairs(c.stems) do
+        local need = d.cost[stem]
+        local have = view and S.ask("available_stock", view, stem)
+        local short = (type(have) == "number" and have < need) or st.short == "Short of " .. stem
+        row.price[k] = { icon = S.icon_of(stem), short = short,
+                         text = short and ("[[col:red]]" .. S.num(need) .. "[[/col]]") or S.num(need) }
+        if type(have) == "number" then
+            lines[#lines + 1] = r.s.name .. " can spend " .. S.num(have) .. " of the " .. S.num(need) .. " "
+                .. S.name(stem) .. (d.output and " a batch takes." or " it takes each turn.")
+        end
+    end
+    -- the reason first, unless it is a shortage the lines already show
+    local body = table.concat(lines, "\n")
+    if c.reason ~= "" and (body == "" or string.sub(c.reason, 1, 9) ~= "Short of ") then
+        body = c.reason .. (body ~= "" and "\n" .. body or "")
+    end
+    row.tip = c.head .. "\n" .. body .. c.note
+    row.send = { label = st.on and "Pause" or "Enable", off = not actions or (not st.open and not st.on),
+                 tip = actions and row.tip or S.WORK_OFF }
+    return row
+end
+
+-- a recipe none of your settlements can run: one grey row saying why, and what would run it
+function S.production_none(f, st)
+    local d, c = st.definition, S.economy_cells(st)
+    local row = { S.grey("None of your settlements"), S.grey(c.gives), "", S.grey(S.economy_status(st)), "",
+                  dim = true, price = {}, lead = { [2] = c.gives_icon } }
+    for k, stem in ipairs(c.stems) do
+        row.price[k] = { icon = S.icon_of(stem), short = true, text = S.grey(S.num(d.cost[stem])) }
+    end
+    local why = S.ECON_WHY[st.reason] or c.reason
+    if d.kind == "processing" then
+        local names = S.economy_buildings(d, S.ask("race", f))
+        if #names > 0 then why = why .. "\nBuildings that run it: " .. table.concat(names, ", ") .. "." end
+    end
+    row.tip = c.head .. "\n" .. why .. c.note
+    return row
+end
+
+function S.production(v, realm)
+    v.title = "What your settlements can make"
+    v.hint = "Processing makes resources; services spend them each turn for a bonus."
+    v.heads = { "Settlement", "Gives", "Inputs", "State", "" }
+    v.empty = #realm == 0 and S.NO_REALM or S.NO_RECIPES
+    local f = S.local_faction()
+    if not f then return end
+    local actions = S.actions_on()
+    local by, order = {}, {}
+    for _, s in ipairs(realm) do
+        local region = S.ask("owned", f, s.key)
+        for _, st in ipairs(region and S.ask("economy_rows", f, region) or {}) do
+            local e = by[st.key]
+            if not e then
+                e = { st = st, rows = {} }
+                by[st.key], order[#order + 1] = e, st.key
+            end
+            if st.open or st.on then e.rows[#e.rows + 1] = { s = s, region = region, st = st } end
+        end
+    end
+    -- processing first, then services, each by name
+    table.sort(order, function(a, b)
+        local da, db = by[a].st.definition, by[b].st.definition
+        if da.kind ~= db.kind then return da.kind == "processing" end
+        return da.label < db.label
+    end)
+    for _, key in ipairs(order) do
+        local e = by[key]
+        local fold = S.PROD_FOLD .. key
+        local folded = S.work_fold[fold] == true
+        v.rows[#v.rows + 1] = { S.section(e.st.definition.label), "", "", "", "", section = true, fold = fold,
+                                folded = folded, tip = folded and "Click to show these." or "Click to hide these." }
+        if not folded then
+            if #e.rows == 0 then v.rows[#v.rows + 1] = S.production_none(f, e.st) end
+            for _, r in ipairs(e.rows) do v.rows[#v.rows + 1] = S.production_row(f, r, actions) end
+        end
+    end
 end
 
 -- A SHIPMENT'S ESCORT (escort battles, spec 2026-10-09): a shipment row opens it, one CA unit card a
@@ -1653,7 +1794,7 @@ S.CLOSE = "derpy_mr_close"
 S.BACK = "derpy_mr_back"
 S.TAB = { goods = "derpy_mr_tab_goods", settlements = "derpy_mr_tab_settlements",
           trade = "derpy_mr_tab_trade", spending = "derpy_mr_tab_spending", map = "derpy_mr_tab_map",
-          workshop = "derpy_mr_tab_workshop" }
+          workshop = "derpy_mr_tab_workshop", production = "derpy_mr_tab_production" }
 S.MAP = { dot = "derpy_mr_mapdot_", cart = "derpy_mr_mapcart_", label = "derpy_mr_maplabel_" }
 S.MAP_FILE = { dot = "derpy_mr_stores_mapdot", cart = "derpy_mr_stores_mapcart", label = "derpy_mr_stores_maplabel" }
 S.map_made = { dot = 0, cart = 0, label = 0 }   -- how many of each the panel holds
@@ -1740,6 +1881,7 @@ function S.build()
     label(find_uicomponent(p, S.TAB.spending), "Spending")
     label(find_uicomponent(p, S.TAB.map), "Map")
     label(find_uicomponent(p, S.TAB.workshop), "Workshop")
+    label(find_uicomponent(p, S.TAB.production), "Production")
     label(find_uicomponent(p, S.BACK), "Back")
     -- the chart's twenty bars, made once and kept; draw_chart sizes, shows and hides them
     for i = 1, L.BARS do
@@ -2079,6 +2221,9 @@ function S.draw_rows(p, rows, heads, cols)
             for j = 1, #cols do
                 if rc.lead and rc.lead[j] then leads[#leads + 1] = { rx + cols[j][1], rc.lead[j] } end
             end
+            -- A ROW WITH A PRICE AND LEAD ICONS (the Production tab's inputs and Gives): the price takes the
+            -- first slots, the leads the ones after it
+            local np = rc.price and #rc.price or 0
             for k = 1, L.USING do
                 local u = find_uicomponent(r, "use" .. k)
                 local pk = rc.price and rc.price[k]
@@ -2086,12 +2231,16 @@ function S.draw_rows(p, rows, heads, cols)
                     local path, x = rc.using and rc.using[k], rx + cols[3][1] + (k - 1) * L.ICON_PITCH
                     if rc.lead then path, x = leads[k] and leads[k][2], leads[k] and leads[k][1] end
                     -- A NAMED RECIPE'S PRICE: each good's icon, PRICE_PITCH apart from column 3, grey when short
-                    if rc.price then path, x = pk and pk.icon, rx + cols[3][1] + (k - 1) * L.PRICE_PITCH end
+                    if pk then path, x = pk.icon, rx + cols[3][1] + (k - 1) * L.PRICE_PITCH
+                    elseif rc.price then
+                        local ld = leads[k - np]
+                        path, x = ld and ld[2], ld and ld[1]
+                    end
                     u:SetVisible(path ~= nil)
                     if path then
                         u:MoveTo(x, ry + L.icon[2])
                         u:SetImagePath(path, 0)
-                        S.fx(u, pk and pk.short and "off" or "live")
+                        S.fx(u, (pk and pk.short or rc.dim) and "off" or "live")
                     end
                 end
                 -- and its amount after it
@@ -2510,7 +2659,7 @@ end
 function S.is_mine(name)
     return type(name) == "string" and (name == S.BUTTON or name == S.ARMY_BUTTON or name == S.CLOSE or name == S.BACK
         or name == S.TAB.goods or name == S.TAB.settlements or name == S.TAB.trade or name == S.TAB.spending
-        or name == S.TAB.map or name == S.TAB.workshop or S.map_hits[name] ~= nil
+        or name == S.TAB.map or name == S.TAB.workshop or name == S.TAB.production or S.map_hits[name] ~= nil
         or string.sub(name, 1, #S.ROW) == S.ROW or string.sub(name, 1, #S.SW) == S.SW
         or string.sub(name, 1, #S.BULK) == S.BULK or string.sub(name, 1, #S.ORDER) == S.ORDER
         or string.sub(name, 1, #S.POLICY) == S.POLICY or name == S.SEND or name == S.SELL or name == S.ZOOM_IN or name == S.ZOOM_OUT)

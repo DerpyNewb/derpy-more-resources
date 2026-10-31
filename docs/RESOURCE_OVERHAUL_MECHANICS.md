@@ -128,7 +128,7 @@ Forecasts combine known production, recurring use and committed incoming cargo. 
 | Scripted stock trade | Moves actual stored goods between treaty partners to meet recipient targets |
 | Optional Grand Trade Exchange | Supplies its own market, prices and investments; installed separately |
 
-Scripted stock trade runs on the exporter's turn. For each good and partner it selects the exporter's cheapest store holding that good (the lowest local price; ties go to the one with more to spare, then the region key), then sends up to **5%** of what that store can spare by default, rounded down. Before 2026-10-24 it took the store with the largest removable surplus, which is usually a large, comfortable capital. The recipient's target deficit and free space limit the transfer. Since 2026-10-24 a good also moves only uphill: the partner capital's local price must be at least the source store's buy price ([Local prices](#local-prices-2026-10-24)), so two comfortable stores trade nothing. A store with no price on either side moves nothing. Since 2026-10-24 the goods no longer arrive at once: they leave as a convoy that travels the road to the partner's home capital ([Cargo on the road](#cargo-on-the-road-2026-10-24)).
+Scripted stock trade runs on the exporter's turn. For each good and partner it selects the exporter's cheapest store holding that good (the lowest local price; ties go to the one with more to spare, then the region key), then sends up to **5%** of what that store can spare by default, rounded down but never under 1 while it has any to spare (since 2026-10-30; rounded down to 0, half the computers' spare goods on open roads moved nothing). Before 2026-10-24 it took the store with the largest removable surplus, which is usually a large, comfortable capital. The recipient's target deficit and free space limit the transfer. Since 2026-10-24 a good also moves only uphill: the partner capital's local price must be at least the source store's buy price ([Local prices](#local-prices-2026-10-24)), so two comfortable stores trade nothing. A store with no price on either side moves nothing. Since 2026-10-24 the goods no longer arrive at once: they leave as a convoy that travels the road to the partner's home capital ([Cargo on the road](#cargo-on-the-road-2026-10-24)).
 
 For example, 100 removable units permit a five-unit export at the default rate, provided the partner needs five and can store them. The calculation does not export 5% of the entire realm's combined holdings from every settlement.
 
@@ -143,6 +143,19 @@ The answer is worked out once per pair per turn by whichever partner's turn star
 Timing measured offline on the Immortal Empires grid (stock Lua 5.1, no engine lookups): an open road 7 ms, a detour round enemy land 29 ms, a capital ringed by enemies 10 ms, the worst case found (a long enemy wall) 101 ms at 6 turns and 348 ms at 10. A pair further apart than the reach in a straight line is rejected before any search. In game (vanilla Immortal Empires, 2026-10-22) a search took 9-341 ms from Uzkulak and 746 ms at worst (Altdorf to Karak Norn, cut off by enemy land); 12 agreements cost 1.3 s at the player's turn start. With "goods move between other factions" on (the default) computer-to-computer agreements are judged too, and 42 of them took about 4 s of one end turn, 7.6 s in a 20-partner test. Since 2026-10-23 the native grid edges are decoded once per hex and reused, which took the same 107 pairs from 7.4 s to 4.0 s warm with identical answers. **The author decided on 2026-10-23 to keep computer-only pairs on the full rule for now.** The recorded alternatives are caching a computer-only pair's answer for a few turns, or skipping the rule between two computer factions.
 
 Reach answers are dropped and worked out again the same turn when war is declared, on a positive or negative diplomatic event, and when a region changes owner (`F.invalidate_reach`, 2026-10-23). Queued route searches and the bundled road network are dropped with them. An attitude change made by script without one of those events waits for the next turn's answer.
+
+**Kept answers (2026-10-29).** Working an answer out again no longer means searching again. `R.reach` keeps each road's answer with the verdict of every region its search looked at, and gives it again while each of those regions still judges the same (`R.unchanged`). The search depends on the terrain and those verdicts and nothing else, so a kept answer is the one a new search would give: the rule, every answer and every road are unchanged, and machines agree whatever each has kept. A war, a capture or an attitude crossing -70 searches again only the pairs whose search touched that land. The road through hostile land as well, which only names the reason, depends on terrain alone and is kept for the campaign; a pair with no road even through it answers "too far" without the walled search. Offline (the Immortal Empires grid, 120 pairs at 6 turns, a stub world): a round with nothing changed 7.7 s to 44 ms, one war changed 120 ms, a cold round (the first after a load) 9.7 s to 7.4 s, every answer and road identical. In game, on the 10-24 fixture, the computers' turn handlers went from 12.4-14.5 s to 6.2 s in the first round after a load and 4.2 s in the next. [TRADE_RESOURCES.md §53](TRADE_RESOURCES.md#53-kept-reach-answers-2026-10-29).
+
+**Dragging the map (2026-10-29).** A camera move only places what is near the camera, from the last refresh's links, goods and shared stretches. The full refresh (links, cart goods from trade previews) runs on a change, and on the 2.5 s timer once the camera is still. [TRADE_RESOURCES.md §54](TRADE_RESOURCES.md#54-map-redraw-while-dragging-2026-10-29).
+
+**The map at a war or diplomatic event (2026-10-30).** Every such event clears the reach answers and asks the map to check its roads again. Nothing is drawn differently until an answer actually moves:
+
+- **Roads.** A shown road whose regions all still judge the same is given back unsearched (`R.path`, as `R.reach`), and a changed one keeps its old line until the new search lands.
+- **Agreement lines.** An agreement whose new reach answer is still being worked out keeps its last line.
+- **Network.** It is bundled again only when a road or a link really changes, and at the player's turn.
+- **Cart goods.** Their trade previews are kept, and one seller is renewed every 0.5 s. A player's action through the panel (a trade switch, a stock rule, a sale, an order) has them all worked out again on the next tick.
+
+In game, the map's share of the computers' turns fell from 9 to 12 s a round to 0.74 s, and a still camera's timed refresh from 37 to 62 ms to 10 ms at most. [TRADE_RESOURCES.md §55](TRADE_RESOURCES.md#55-route-map-during-the-computers-turns-2026-10-30).
 
 ### Local prices (2026-10-24)
 
@@ -373,6 +386,8 @@ Each enabled recipe runs at most once per owner turn. The settlement must still 
 
 Processing inputs enter automatic stock policy. Its output is conditional and should not be treated as guaranteed production in a forecast.
 
+Computer factions run a recipe or service only while two batches can be paid and the output is under its target. Since 2026-10-30, when they cannot pay two, a cart comes from the faction's fullest other store, filled toward ten batches, the way army relief ships food. Every short input must be coverable, or no cart goes. It shares the one-cart limit with relief and province supplies, and the player is never sent one ([TRADE_RESOURCES.md §56](TRADE_RESOURCES.md#56-computer-trade-and-workshop-inputs-2026-10-30)).
+
 ### Sustained province services (#4)
 
 Services are enabled at an owned province capital, with **one selected service per province**. The global setting defaults on; player selections start off. Each full local basket buys that turn's benefit.
@@ -442,6 +457,7 @@ In an existing save, armies that already have a cargo ledger keep it unchanged; 
 | Spending | Supplies, orders, shipments, recruitment/duty records and army provisions |
 | Map | Settlement and shipment locations |
 | Workshop | Rare purchases, upgrades, research and named recipes |
+| Production | Every processing recipe and service the race has, realm-wide: where each runs, what it gives, which inputs each settlement is short of, and Enable/Pause (2026-10-31, [TRADE_RESOURCES.md §57](TRADE_RESOURCES.md#57-the-vaults-production-tab-2026-10-31)) |
 
 The Vault is reached through the mod's HUD opener/hub. Detail views and tooltips explain eligibility and blocked actions. The maintained layouts include a 720p testing format; validation evidence distinguishes offline previews from actual in-game checks.
 

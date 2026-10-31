@@ -23,34 +23,51 @@ function R.point(g, id)
     return { (id - 1) % g.w, math.floor((id - 1) / g.w) }
 end
 
-function R.push(h, item)
-    local i = #h + 1
-    while i > 1 do
-        local parent = math.floor(i / 2)
-        if h[parent][1] <= item[1] then break end
-        h[i], i = h[parent], parent
-    end
-    h[i] = item
+-- The open list: a binary heap in three arrays (estimate, hex, cost), so a push makes no table.
+function R.heap()
+    return { n = 0, f = {}, id = {}, cost = {} }
 end
 
-function R.pop(h)
-    local first, last = h[1], table.remove(h)
-    if #h > 0 then
-        local i = 1
-        while i * 2 <= #h do
-            local child = i * 2
-            if child < #h and h[child + 1][1] < h[child][1] then child = child + 1 end
-            if last[1] <= h[child][1] then break end
-            h[i], i = h[child], child
-        end
-        h[i] = last
+function R.push(h, f, id, cost)
+    local F, I, C = h.f, h.id, h.cost
+    local i = h.n + 1
+    h.n = i
+    while i > 1 do
+        local parent = math.floor(i / 2)
+        if F[parent] <= f then break end
+        F[i], I[i], C[i] = F[parent], I[parent], C[parent]
+        i = parent
     end
-    return first
+    F[i], I[i], C[i] = f, id, cost
+end
+
+-- -> the hex and cost of the lowest estimate
+function R.pop(h)
+    local F, I, C, n = h.f, h.id, h.cost, h.n
+    local id, cost = I[1], C[1]
+    local lf, li, lc = F[n], I[n], C[n]
+    F[n], I[n], C[n] = nil, nil, nil
+    n = n - 1
+    h.n = n
+    if n > 0 then
+        local i = 1
+        while i * 2 <= n do
+            local child = i * 2
+            if child < n and F[child + 1] < F[child] then child = child + 1 end
+            if lf <= F[child] then break end
+            F[i], I[i], C[i] = F[child], I[child], C[child]
+            i = child
+        end
+        F[i], I[i], C[i] = lf, li, lc
+    end
+    return id, cost
 end
 
 -- Enemy or aggressive land costs R.AVOID per hex: a route detours round it where it can and still crosses
 -- where it cannot (an island, a besieged pass). Aggressive is the diplomacy screen's "very unfriendly" or worse.
-R.AVOID, R.AGGRESSIVE, R.epoch, R.queued, R.budget = 5, -70, 1, {}, 1
+R.AVOID, R.AGGRESSIVE, R.epoch, R.queued = 5, -70, 1, {}
+R.SHOW_BUDGET, R.shows, R.show_until = 0.004, 0, 0   -- seconds of new reach answers a map refresh may work out
+R.SEARCH_CAP = 200000   -- hexes one search may expand; past it, it gives up with no road
 
 function R.hostile(owner, parties)
     for _, p in ipairs(parties) do
@@ -66,28 +83,31 @@ end
 function R.start(g, a, b, avoid)
     if g.edge_data ~= g.data then g.edges, g.edge_data = {}, g.data end
     local first, target = R.index(g, a[1], a[2]), R.index(g, b[1], b[2])
-    local j = { g = g, target = target, dest = b, open = {}, costs = {}, prev = {}, count = 0, avoid = avoid, seen = {} }
-    if first and target then j.costs[first] = 0; R.push(j.open, {0, first, 0}) end
+    local j = { g = g, target = target, dest = b, open = R.heap(), costs = {}, prev = {}, count = 0, avoid = avoid, seen = {} }
+    if first and target then j.costs[first] = 0; R.push(j.open, 0, first, 0) end
     return j
 end
 
 function R.advance(j, budget)
-    local g = j.g
+    local g, open, costs, prev, seen = j.g, j.open, j.costs, j.prev, j.seen
+    local w, edges, all_bridges = g.w, g.edges, g.bridges
+    local floor, abs, max = math.floor, math.abs, math.max
+    local avoid, wall, corridor, shared, limit, target = j.avoid, j.wall, j.corridor, j.shared, j.max, j.target
+    local tx, ty = j.dest[1], j.dest[2]
     for _ = 1, budget do
-        if #j.open == 0 or j.count >= 200000 then return true end
-        local node = R.pop(j.open)
-        local id, cost = node[2], node[3]
-        if id == j.target then
+        if open.n == 0 or j.count >= R.SEARCH_CAP then return true end
+        local id, cost = R.pop(open)
+        if id == target then
             local reverse, path = {}, {}
-            while id do reverse[#reverse + 1] = R.point(g, id); id = j.prev[id] end
+            while id do reverse[#reverse + 1] = R.point(g, id); id = prev[id] end
             for i = #reverse, 1, -1 do path[#path + 1] = reverse[i] end
             return true, path
         end
-        if j.costs[id] == cost then
+        if costs[id] == cost then
             j.count = j.count + 1
-            local x, y = (id - 1) % g.w, math.floor((id - 1) / g.w)
+            local x, y = (id - 1) % w, floor((id - 1) / w)
             -- Native reciprocal edges are immutable; diplomacy and bridge checks remain live.
-            local neighbours = g.edges[id]
+            local neighbours = edges[id]
             if not neighbours then
                 neighbours = {}
                 local mask = R.masks[string.byte(g.data, id)] or 0
@@ -99,30 +119,30 @@ function R.advance(j, budget)
                         neighbours[#neighbours + 1] = other
                     end
                 end
-                g.edges[id] = neighbours
+                edges[id] = neighbours
             end
-            local bridges = g.bridges[id]
-            for n = 1, #neighbours + (bridges and #bridges or 0) do
-                local other = n <= #neighbours and neighbours[n] or bridges[n - #neighbours]
-                local qx, qy = (other - 1) % g.w, math.floor((other - 1) / g.w)
-                local step, walled = math.max(1, math.abs(qx - x), math.abs(qy - y)), false
-                if j.corridor and not j.corridor[other] then walled = true end
-                if j.avoid then
-                    if j.seen[other] == nil then j.seen[other] = j.avoid(qx, qy) end
-                    if j.seen[other] then
-                        if j.wall then walled = true else step = step * R.AVOID end
+            local bridges, near = all_bridges[id], #neighbours
+            for n = 1, near + (bridges and #bridges or 0) do
+                local other = n <= near and neighbours[n] or bridges[n - near]
+                local qx, qy = (other - 1) % w, floor((other - 1) / w)
+                local step, walled = max(1, abs(qx - x), abs(qy - y)), false
+                if corridor and not corridor[other] then walled = true end
+                if avoid then
+                    if seen[other] == nil then seen[other] = avoid(qx, qy) end
+                    if seen[other] then
+                        if wall then walled = true else step = step * R.AVOID end
                     end
                 end
-                if j.shared and j.shared[other] then step = step * 0.25 end
+                if shared and shared[other] then step = step * 0.25 end
                 local next_cost = cost + step
                 -- the estimate never overstates a hex distance, so a node past j.max cannot lead to a road within it
-                local estimate = math.max(math.abs(qx - j.dest[1]), math.abs(qy - j.dest[2]))
-                if j.shared then estimate = estimate * 0.25 end
+                local estimate = max(abs(qx - tx), abs(qy - ty))
+                if shared then estimate = estimate * 0.25 end
                 -- no math.huge here: it is not safe to assume in the game's Lua (2026-10-21 handoff)
-                if not walled and (not j.max or next_cost + estimate <= j.max)
-                    and (not j.costs[other] or next_cost < j.costs[other]) then
-                    j.costs[other], j.prev[other] = next_cost, id
-                    R.push(j.open, { next_cost + estimate, other, next_cost })
+                if not walled and (not limit or next_cost + estimate <= limit)
+                    and (not costs[other] or next_cost < costs[other]) then
+                    costs[other], prev[other] = next_cost, id
+                    R.push(open, next_cost + estimate, other, next_cost)
                 end
             end
         end
@@ -130,46 +150,79 @@ function R.advance(j, budget)
     return false
 end
 
--- Paths are worked out again once per turn (R.epoch), since wars and attitudes move; the old line stays up
--- until the new one is ready. ponytail: re-paths every shown route each turn; skip unchanged hostility if it shows.
+-- Paths are checked again whenever R.epoch moves (each turn, each war or diplomatic event), since wars and
+-- attitudes move. A road whose every region still judges the same is the road a new search would find (R.unchanged,
+-- as R.reach), so it is given again unsearched; a changed one is searched again and its old line stays up meanwhile
+-- (2026-10-29: re-searching every shown road at every diplomatic event was 4 s of each computer round).
+R.kept = {}
 function R.path(from, to)
     local key = from .. '>' .. to
     if R.queued[key] == R.epoch or not R.grid then return R.cache[key] or nil end
     R.queued[key] = R.epoch
     local a, b = cm:get_region(from), cm:get_region(to)
     if not a or not b or a:is_null_interface() or b:is_null_interface() then return R.cache[key] or nil end
-    local avoid = R.avoider(a, b)
+    local kept = R.kept[key]
+    if kept and kept.data == R.grid.data and R.unchanged(kept.regions, a, b) then
+        R.cache[key] = kept.path
+        return kept.path or nil
+    end
+    local regions = {}
+    local avoid = R.avoider(a, b, regions)
     a, b = a:settlement(), b:settlement()
     if a:is_null_interface() or b:is_null_interface() then return R.cache[key] or nil end
     local j = R.start(R.grid, {a:logical_position_x(), a:logical_position_y()},
                                {b:logical_position_x(), b:logical_position_y()}, avoid)
-    j.key = key
+    j.key, j.regions = key, regions
     R.queue[#R.queue + 1] = j
     return R.cache[key] or nil
 end
 
 -- (x, y) -> is that hex enemy or aggressive land to the owners of regions a and b; one verdict per owner.
-function R.avoider(a, b)
+-- A hex's verdict is its region's, worked out once per region and filed in `regions` (key -> verdict).
+-- The second result judges a region the same way, for R.unchanged.
+function R.avoider(a, b, regions)
     local parties = {}
     for _, region in ipairs({a, b}) do
         local owner = region:owning_faction()
         if not owner:is_null_interface() then parties[#parties + 1] = owner end
     end
     local model, verdicts = cm:model(), {}
-    return function(x, y)
-        local region = model:get_region_at_logical_position(x, y)
-        if region:is_null_interface() then return false end
+    regions = regions or {}
+    local function judge(region)
         local owner = region:owning_faction()
         if owner:is_null_interface() then return false end
         local name = owner:name()
         if verdicts[name] == nil then verdicts[name] = R.hostile(owner, parties) end
         return verdicts[name]
     end
+    return function(x, y)
+        local region = model:get_region_at_logical_position(x, y)
+        if region:is_null_interface() then return false end
+        local key = region:name()
+        if regions[key] == nil then regions[key] = judge(region) end
+        return regions[key]
+    end, judge
+end
+
+-- Would every region a walled search looked at still give it the same verdict? Then it would find the
+-- same road: the search is a function of the terrain and those verdicts alone (land changing hands is
+-- a region whose verdict is asked again, so no event has to be heard for it).
+function R.unchanged(regions, from, to)
+    local _, judge = R.avoider(from, to)
+    for key, was in pairs(regions) do
+        local region = cm:get_region(key)   -- false, not a null interface, for no such region
+        if not region or region:is_null_interface() or judge(region) ~= was then return false end
+    end
+    return true
 end
 
 -- TRADE REACH: is there a road between two settlements that stays off land hostile to either owner and is
 -- no longer than max hexes (nil: any length)? Returns ok, why ('far' or 'enemy') and the road. Synchronous,
 -- for the economy at a turn start; enemy land is a wall here, where R.path only charges for it.
+-- Answers are kept by road (its two ends and max) and given again while R.unchanged holds, which is the
+-- answer a new search would give, so every machine agrees whatever each one has kept.
+-- ponytail: kept for every pair ever asked; prune by last use if memory shows it.
+R.reach_memo, R.free_memo = {}, {}
 function R.reach(from, to, max)
     local g = R.grids[cm:model():campaign_name_key()]
     if not g then return true end   -- a map with no grid has nothing to judge by, so trade is never stopped
@@ -181,12 +234,29 @@ function R.reach(from, to, max)
         j.wall, j.max = true, max
         local done, path
         repeat done, path = R.advance(j, 100000) until done
-        return path
+        return path, j.count < R.SEARCH_CAP
     end
-    local path = run(R.avoider(from, to))
-    if path then return true, nil, path end
-    -- no safe road: the enemy is to blame when a road through their land would have been short enough
-    return false, run(nil) and 'enemy' or 'far'
+    local key = first[1] .. ',' .. first[2] .. '>' .. last[1] .. ',' .. last[2] .. '>' .. tostring(max)
+    -- the road through enemy land too: terrain alone, so worked out once per road and map, when first needed
+    local free = R.free_memo[key]
+    if free and free.data ~= g.data then free = nil end
+    -- no road even through enemy land, the search having run to its end: a walled one cannot find one either
+    if free and not free.open and free.finished then return false, 'far' end
+    local memo = R.reach_memo[key]
+    if not (memo and memo.data == g.data and R.unchanged(memo.regions, from, to)) then
+        local regions = {}
+        local path = run(R.avoider(from, to, regions))
+        if not path and not free then
+            local road, finished = run(nil)
+            free = { data = g.data, open = road ~= nil, finished = finished }
+            R.free_memo[key] = free
+        end
+        -- no safe road: the enemy is to blame when a road through their land would have been short enough
+        memo = { data = g.data, regions = regions, ok = path ~= nil, path = path,
+                 why = not path and (free.open and 'enemy' or 'far') or nil }
+        R.reach_memo[key] = memo
+    end
+    return memo.ok, memo.why, memo.path
 end
 
 -- Computed by the synchronized dispatch, then saved on the cargo; never use the UI's path cache here.
@@ -207,6 +277,7 @@ function R.pump()
     local done, path = R.advance(j, 1000)
     if done then
         R.cache[j.key] = path or false
+        if j.regions then R.kept[j.key] = { path = path or false, regions = j.regions, data = j.g.data } end
         table.remove(R.queue, 1)
         R.dirty = true
         core:trigger_event('DerpyMRTerrainRoutesUpdated')
@@ -266,6 +337,22 @@ function R.vehicle(fkey,sea)
         R.vehicle_profiles[fkey]=profile
     end
     return profile and profile[sea and 'sea' or 'land']
+end
+
+-- THE CART GOODS' PREVIEWS ARE KEPT (2026-10-29): one allocator preview is ~3 ms and a refresh asked for ten, so a
+-- still camera's timed refresh stalled a frame. The map keeps them in R.plans and works out one seller again every
+-- R.PLAN_EVERY ticks (R.renew_plan), so a sale or a switch shows within seconds and no frame pays for them all.
+R.plans, R.PLAN_EVERY, R.reach_shown = {}, 5, {}
+function R.renew_plan()
+    local F, sellers = DERPY_MR_FLOWS, {}
+    if not F then return end
+    for seller in pairs(R.plans) do sellers[#sellers + 1] = seller end
+    if #sellers == 0 then return end
+    table.sort(sellers)
+    R.plan_next = (R.plan_next or 0) % #sellers + 1
+    local seller = sellers[R.plan_next]
+    local faction = cm:get_faction(seller)
+    if faction and not faction:is_null_interface() then R.plans[seller] = F.trade(faction, true) end
 end
 
 function R.carried(goods,seller,buyer,plans)
@@ -470,7 +557,7 @@ function R.animate()
 end
 
 function R.links(faction)
-    local links, cargo, seen, owned, plans = {}, {}, {}, {}, {}
+    local links, cargo, seen, owned, plans, used = {}, {}, {}, {}, R.plans, {}
     local regions = faction:region_list()
     for i = 0, regions:num_items() - 1 do owned[regions:item_at(i):name()] = true end
     local function add(owner, from, to, road, goods)
@@ -536,20 +623,28 @@ function R.links(faction)
                         or (visible[home:name()] and visible[dest:name()])) then
                         local colour_owner = key == faction:name() and partner:name() or key
                         -- An agreement whose trade is cut off draws no line; one that runs draws its own road.
-                        -- One new reach per refresh, so a fresh turn or a load never stalls a frame for long.
+                        -- New reach answers for R.SHOW_BUDGET seconds a refresh, at least one, so a fresh turn or a
+                        -- load never stalls a frame for long; a kept answer costs next to nothing, so most come at once.
+                        -- One still to work out keeps its last line up: dropping it re-bundled the whole network at
+                        -- every diplomatic event, up to 400 ms a refresh (2026-10-30).
                         local open, _, road = true, nil, nil
                         if F.reach then
+                            local pair = home:name() .. '>' .. dest:name()
                             open, _, road = F.reach(home, dest, 'peek')
-                            if open == nil and R.budget > 0 then
-                                R.budget = R.budget - 1
+                            if open == nil and (R.shows == 0 or os.clock() < R.show_until) then
+                                R.shows = R.shows + 1
                                 open, _, road = F.reach(home, dest, 'show')
                             elseif open == nil then
                                 R.dirty = true
+                                local was = R.reach_shown[pair]
+                                if was then open, road = was[1], was[2] end
                             end
+                            if open ~= nil then R.reach_shown[pair] = { open, road } end
                         end
                         if open then
                             local goods={R.goods(key,partner:name()),R.goods(partner:name(),key)}
                             if #goods[1]>0 or #goods[2]>0 then
+                                used[key], used[partner:name()] = true, true
                                 add(colour_owner, home:name(), dest:name(), road,
                                     {R.carried(goods[1],key,partner:name(),plans),R.carried(goods[2],partner:name(),key,plans)})
                             end
@@ -559,6 +654,7 @@ function R.links(faction)
             end
         end
     end
+    for seller in pairs(plans) do if not used[seller] then plans[seller] = nil end end   -- renew only what is drawn
     table.sort(links, function(a,b)
         if a.own ~= b.own then return a.own end
         return a.key < b.key
@@ -585,10 +681,13 @@ function R.bundle(path, shared, g, avoid)
     return path
 end
 
+-- Bundled again when a road or a link changes, and at the player's turn (R.new_turn); not at every war or diplomatic
+-- event, which re-bundled the whole network dozens of times a computer round. A war that touches only the corridor
+-- round a road, and not the road, shows from the next turn.
 function R.network(links)
     if not R.grid then return links end
     local cached, same = R.network_cache, true
-    if not cached or cached.epoch~=R.epoch or #cached.raw~=#links then same=false end
+    if not cached or #cached.raw~=#links then same=false end
     for i,link in ipairs(links) do
         link.path=link.path or R.path(link.from,link.to)
         local old=cached and cached.raw[i]
@@ -610,7 +709,7 @@ function R.network(links)
         end
         roads[#roads+1]=road
     end
-    R.network_cache={epoch=R.epoch,raw=links,links=roads}
+    R.network_cache={raw=links,links=roads}
     return roads
 end
 
@@ -628,7 +727,25 @@ function R.unshared(path, seen)
     return visible
 end
 
-function R.refresh()
+-- A road's hexes in display coordinates, worked out once per road: a refresh reads every one of them to
+-- find what is near the camera, and a road's table is replaced, never edited, when its route changes.
+R.shown_at = setmetatable({}, { __mode = 'k' })
+function R.display(path)
+    local d = R.shown_at[path]
+    if not d then
+        d = {}
+        for i, p in ipairs(path) do
+            local x, y = cm:log_to_dis(p[1], p[2])
+            d[i] = { x, y }
+        end
+        R.shown_at[path] = d
+    end
+    return d
+end
+
+-- moved: the camera alone moved, so the links and goods of the last refresh still hold and only what is
+-- near the camera is placed again (author, 2026-10-29: a full refresh per tick skipped frames while dragging)
+function R.refresh(moved)
     if not R.grid then return end
     local faction = cm:get_faction(cm:get_local_faction_name(true))
     if not faction or faction:is_null_interface() then return end
@@ -636,9 +753,17 @@ function R.refresh()
     local cx, cy, zoom = cm:get_camera_position()
     R.camera = {cx, cy, zoom}
     local radius = math.max(35, zoom * 4)
-    R.budget = 1
+    R.shows, R.show_until = 0, os.clock() + R.SHOW_BUDGET
     local size, set = R.style()
-    local links, cargo = R.links(faction)
+    local links, cargo, unshared
+    if moved and R.drawn then
+        links, cargo, unshared = R.drawn[1], R.drawn[2], R.drawn[3]
+    else
+        links, cargo = R.links(faction)
+        -- the same bundled network (R.network gives back its cached table) has the same shared stretches
+        unshared = R.drawn and R.drawn[1] == links and R.drawn[3] or {}
+        R.drawn = { links, cargo, unshared }
+    end
     local old_traffic, traffic, shared, routes = {}, {}, {}, {}
     for _, t in ipairs(R.traffic) do old_traffic[t.key] = t end
     for _, s in ipairs(cargo) do
@@ -656,13 +781,14 @@ function R.refresh()
     for _, link in ipairs(links) do
         local path = link.path or R.path(link.from, link.to)
         if path then
-            local visible = R.unshared(path, shared)
+            local visible = unshared[link]
+            if not visible then visible = R.unshared(path, shared); unshared[link] = visible end
+            local shown = R.display(path)
             local closest, best
             if R.shown('carts') and #path > 1
                 and (not link.goods or #link.goods[1]>0 or #link.goods[2]>0) then
-                for i,p in ipairs(path) do
-                    local dx,dy = cm:log_to_dis(p[1],p[2])
-                    local d = (dx-cx)*(dx-cx)+(dy-cy)*(dy-cy)
+                for i,q in ipairs(shown) do
+                    local d = (q[1]-cx)*(q[1]-cx)+(q[2]-cy)*(q[2]-cy)
                     if d <= radius*radius and (not best or d < best) then closest,best = i,d end
                 end
                 if closest then
@@ -688,7 +814,7 @@ function R.refresh()
             for i = 1, #path, 2 do
                 if count >= 512 then break end
                 local p = path[i]
-                local dx, dy = cm:log_to_dis(p[1], p[2])
+                local dx, dy = shown[i][1], shown[i][2]
                 if visible[i] and (dx-cx)*(dx-cx) + (dy-cy)*(dy-cy) <= radius * radius then
                     local id = 'derpy_mr_road_' .. (count + 1)
                     wanted[id] = { x = p[1], y = p[2], scene = R.dash(path, i, R.ink(link.owner, set), size) }
@@ -760,10 +886,24 @@ function R.tick()
         local camera = R.camera
         local moved = camera and ((x-camera[1])*(x-camera[1]) + (y-camera[2])*(y-camera[2]) > 16
                                 or math.abs(zoom-camera[3]) > 2)
-        if R.dirty or moved or R.ticks % 25 == 1 then R.dirty = false; R.refresh() end
+        -- the timed refresh catches what nothing reports (a sale, a recruit); it waits for the camera to stop
+        R.stale = R.stale or R.ticks % 25 == 1
+        if R.dirty or (R.stale and not moved) or not R.drawn then
+            R.dirty, R.stale = false, false
+            R.refresh()
+        elseif moved then
+            R.refresh(true)
+        elseif R.ticks % R.PLAN_EVERY == 0 then
+            R.renew_plan()   -- never on a tick that already refreshed
+        end
         R.animate()
     end)
     if not ok and not R.failed then R.failed = true; pcall(out, '[derpy_mr_routes] ' .. tostring(err)) end
+end
+
+-- The player's turn: every shown road is checked again and the network bundled again.
+function R.new_turn()
+    R.epoch, R.dirty, R.network_cache = R.epoch + 1, true, nil
 end
 
 function R.init()
@@ -783,7 +923,7 @@ function R.init()
     cm:repeat_real_callback(R.tick, 100, 'derpy_mr_terrain_routes')
     core:add_listener('derpy_mr_terrain_routes_turn', 'FactionTurnStart',
         function(context) return context:faction():name() == cm:get_local_faction_name(true) end,
-        function() R.epoch = R.epoch + 1; R.dirty = true end, true)
+        function() R.new_turn() end, true)
 end
 
 core:add_listener('derpy_mr_terrain_routes_init', 'ScriptEventFirstTickAfterWorldCreated', true,

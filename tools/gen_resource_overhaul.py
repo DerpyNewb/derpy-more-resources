@@ -3726,26 +3726,27 @@ def pack(t, frag=FRAG):
     """Build the pack in RPFM from the TSVs on disk, then reopen the SAVED pack and count rows."""
     import tempfile
     import read_pack_index as rpi
-    from import_house_ancillaries import call, check_keys
+    from import_house_ancillaries import check_keys
+    from rpfm_client import call, db, ensure_game, new_pack, open_pack
     check_measured()
-    call("set_game_selected", {"game_name": "warhammer_3", "rebuild_dependencies": False})
+    ensure_game()
     plan = []
     for tk, (ver, _c, _r) in sorted(t.items(), key=lambda kv: (kv[0] != "ancillary_info_tables", kv[0])):
         # a "table:part" key is a second file of that table; ancillary_info, the parent row, imports first
         table, ff = _table_frag(tk, frag)
-        plan.append(("db/%s/%s" % (table, ff), {"DB": [ff, table, ver]}, "%s__%s.tsv" % (table, ff), OUT, tk))
+        plan.append(("db/%s/%s" % (table, ff), db(table, ver), "%s__%s.tsv" % (table, ff), OUT, tk))
     main = frag == FRAG   # loc and icons ship once, in the main pack
     if main:
-        plan.append(("text/db/%s.loc" % frag, {"Loc": frag}, "loc__%s.tsv" % frag, OUT))
+        plan.append(("text/db/%s.loc" % frag, {"type": "loc"}, "loc__%s.tsv" % frag, OUT))
     for path, _n, tsv, _o, *tk in plan:   # the files on disk must be what build() makes
         rows = sum(1 for _ in open(os.path.join(OUT, tsv), encoding="utf-8")) - 2
         want = len(t[tk[0]][2]) if tk else n_loc()
         assert rows == want, "%s has %d rows, build() makes %d - run without --pack first" % (tsv, rows, want)
     check_keys(plan)
-    key = call("new_pack", {})["String"]
+    key = new_pack()
     for path, newfile, tsv, _o, *_tk in plan:
-        call("new_packed_file", {"pack_key": key, "path": path, "new_file": json.dumps(newfile)})
-        call("import_tsv", {"pack_key": key, "table_path": path, "tsv_path": os.path.join(OUT, tsv)})
+        call("create_file", {"pack": key, "path": path, "kind": newfile})
+        call("import_tsv", {"pack": key, "path": path, "tsv_path": os.path.join(OUT, tsv)})
     icons = ["%s/%s%s.png" % (ICON_DIR, icon(g), s)
              for g in GOODS for s in ("", "_large")] + [bld_icon(g) for g in RARE] + [LABEL] if main else []
     if main:   # the label on disk must be what label_patch() builds from CA's CURRENT file
@@ -3768,16 +3769,17 @@ def pack(t, frag=FRAG):
             with open(os.path.join(PACK, *rel.split('/')), 'rb') as fh:
                 assert fh.read() == data, 'stale terrain asset: ' + rel
     for rel in icons:
-        call("add_packed_files", {"pack_key": key, "source_paths": [os.path.join(PACK, *rel.split("/"))],
-                                  "destination_paths": json.dumps([{"File": rel}])})
+        call("add_files_from_disk", {"pack": key, "paths": [os.path.join(PACK, *rel.split("/"))],
+                                     "pack_paths": [rel]})
     out = modpack(frag)
-    call("save_pack_as", {"pack_key": key, "path": out})
+    call("save_pack", {"pack": key, "path": out})
     # verify what was SAVED, not what was planned
-    again = call("open_packfiles", {"paths": [out]})["StringContainerInfo"][0]
+    call("close_pack", {"pack": key})   # so the reopen reads the file on disk
+    again = open_pack(out)
     tmp = tempfile.mkdtemp()
     for path, _n, tsv, _o, *_tk in plan:
         dst = os.path.join(tmp, tsv)
-        call("export_tsv", {"pack_key": again, "table_path": path, "tsv_path": dst})
+        call("export_tsv", {"file": {"source": {"pack": again}, "path": path}, "destination": dst})
         got = sum(1 for l in io.open(dst, encoding="utf-8") if l.strip()) - 2
         want = sum(1 for _ in open(os.path.join(OUT, tsv), encoding="utf-8")) - 2
         assert got == want, "saved %s has %d rows, expected %d" % (path, got, want)

@@ -221,10 +221,12 @@ L = {
     # A RULE BETWEEN THE TITLE AND THE TABS (asked for 2026-10-02): the two read as one block
     # without it.
     "title_rule": (20, 46, 820, 2),
-    # SIX TABS, 112 wide and 4 apart, clear of Back at 720 (the Workshop made six, 2026-10-07)
-    "tab_goods": (20, 56, 112, 26), "tab_settlements": (136, 56, 112, 26),
-    "tab_trade": (252, 56, 112, 26), "tab_spending": (368, 56, 112, 26), "tab_map": (484, 56, 112, 26),
-    "tab_workshop": (600, 56, 112, 26),
+    # SEVEN TABS, 4 apart and clear of Back at 720 (Production made seven, 2026-10-30). Six at 112
+    # left no room, so each is sized to its label: CHAR_W a letter and 10 a side on CA's drawn
+    # face (BTN_FACE), at least 80. check_button_faces() holds each label to its tab.
+    "tab_goods": (20, 56, 99, 26), "tab_settlements": (123, 56, 116, 26),
+    "tab_trade": (243, 56, 80, 26), "tab_spending": (327, 56, 91, 26), "tab_map": (422, 56, 80, 26),
+    "tab_workshop": (506, 56, 91, 26), "tab_production": (601, 56, 107, 26),
     # THE MAP TAB: the list's own box, a pad inside it, and no picture of the map - it is framed on
     # the dots it draws, so it fits any campaign. A capital's dot is larger and named; a convoy is
     # CA's convoy icon. The roads are the 3D map's (terrain_routes.lua), in its palette's MAP_PATH_COLOURS
@@ -319,6 +321,10 @@ L = {
         # an upgrade's settlements, Buy here in 5
         "workshop_focus": ((36, 300, "left"), (344, 120, "left"), (472, 100, "left"), (580, 60, "left"),
                            (668, 132, "left")),
+        # the Production tab: a recipe's settlement, what it gives after its icon, its inputs as the
+        # Workshop's price strip from column 3, the state, Enable/Pause in 5
+        "production": ((36, 200, "left"), (240, 150, "left"), (394, 150, "left"), (550, 110, "left"),
+                       (668, 132, "left")),
         # no list on the Map tab: the Resources tab's columns, for headers it leaves blank
         "map": ((36, 204, "left"), (244, 90, "right"), (338, 100, "right"), (442, 110, "right"),
                 (556, 240, "right")),
@@ -428,6 +434,8 @@ def build_panel():
             ("derpy_mr_tab_workshop", L["tab_workshop"],
              "Workshop||Spend your stores on items, units, settlement upgrades, research and works for "
              "your armies and characters."),
+            ("derpy_mr_tab_production", L["tab_production"],
+             "Production||What your settlements can make from their stores, where, and what each is short of."),
             ("derpy_mr_back", L["back"], "Back to the full list.")):
         p.add(_cell(E, name, box[2], box[3], interactive=True, image=BTN_BG,
                     hover=[_flat(BTN_HOVER)], sound=SND_SMALL, align="Center", tooltip=tip))
@@ -1255,8 +1263,22 @@ def check_economy_mutations():
         ("service benefit", 'cm:apply_effect_bundle_to_region(d.bundle, region:name(), F.BUNDLE_TURNS)', 'do end'),
         ("compensation", 'local delta = before[c[1]] - F.held(region, c[1])', 'local delta = 0'),
         ("AI budget", 'F.economy_admit(faction, region, d, 2)', 'F.economy_admit(faction, region, d, 1)'),
-        ("AI named output", 'on = (view.held[stem] or 0) + (view.incoming[stem] or 0) < target',
-         'on = F.import_need(view, stem) > 0'),
+        ("AI named output", 'return (v.held[stem] or 0) + (v.incoming[stem] or 0) < target',
+         'return F.import_need(v, stem) > 0'),
+        ("trade share at least 1", "F.share(removable, pct)", "math.floor(removable * pct / 100)"),
+        ("input cart computers only",
+         "if faction:is_human() or not rates.ai or not F.uses_stores(faction) then return end",
+         "if not rates.ai or not F.uses_stores(faction) then return end"),
+        ("input cart switch", "if d.kind == kind and rates[kind] and F.economy_open(faction, region, d) then",
+         "if d.kind == kind and F.economy_open(faction, region, d) then"),
+        ("input cart wanted output", "local plan = F.economy_wanted(v, d) and {} or nil", "local plan = {}"),
+        ("input cart covers two batches", "if not fit or fit.got < math.min(short, F.CART_MAX - F.lost(F.CART_MAX)) then",
+         "if not fit then"),
+        ("input cart full cart allowed", "fit.got < math.min(short, F.CART_MAX - F.lost(F.CART_MAX))", "fit.got < short"),
+        ("input cart whole recipe", "then plan = nil; break end", "then break end"),
+        ("input cart past reserves", "local have = F.room(v, stem) +", "local have = F.available_stock(v, stem) +"),
+        ("input cart fill", "math.min(F.SHIP.ai_on * d.cost[stem] - have, free)", "math.min(short, free)"),
+        ("input cart each turn", "    F.guard(F.economy_supply, faction)\n", ""),
         ("campaign switch", 'and F.rates()[kind] and F.economy_open(faction, region, d)',
          'and F.economy_open(faction, region, d)'),
         ("capture cleanup", '    F.economy_clear(region)\n    local ups', '    local ups'),
@@ -1673,12 +1695,192 @@ def check_cargo_view_mutations():
     print("cargo view mutations: %d/%d caught; restored harnesses pass" % (len(panel) + len(markers), len(panel) + len(markers)))
 
 
+def check_reach_mutations():
+    """Kept reach answers (2026-10-29): R.reach gives a road again only while every region its search looked at
+    judges the same, so a kept answer is the one a new search would give. Each rule broken once; the terrain
+    harness must fail."""
+    luac = LUA_EXE.replace("lua.exe", "luac.exe")
+    with io.open(TERRAIN_SRC, encoding="utf-8", newline="") as fh:
+        terrain = fh.read().replace("\r\n", "\n")
+    kept = "if not (memo and memo.data == g.data and R.unchanged(memo.regions, from, to)) then"
+    mutations = (
+        ("kept answer never checked", kept, "if not (memo and memo.data == g.data) then"),
+        ("kept answer never given", kept, "if true then"),
+        ("kept answer outlives the map", kept, "if not (memo and R.unchanged(memo.regions, from, to)) then"),
+        ("reach left out of the key", " .. '>' .. tostring(max)", ""),
+        ("no shortcut for a pair with no road at all",
+         "    if free and not free.open and free.finished then return false, 'far' end\n", ""),
+        ("a search that gave up taken as proof", "if free and not free.open and free.finished then",
+         "if free and not free.open then"),
+        ("road through enemy land outlives the map", "    if free and free.data ~= g.data then free = nil end\n", ""),
+        ("only a region turned friendly is noticed", "if not region or region:is_null_interface() or judge(region) ~= was then",
+         "if was and judge(region) ~= was then"),
+        ("no such region taken as unchanged", "if not region or region:is_null_interface() or judge(region) ~= was then",
+         "if region and judge(region) ~= was then"),
+        ("heap sifts down to the larger child", "if child < n and F[child + 1] < F[child] then child = child + 1 end",
+         "if child < n and F[child + 1] > F[child] then child = child + 1 end"),
+        ("heap push never rises", "if F[parent] <= f then break end", "if true then break end"),
+    )
+    for label, before, after in mutations:
+        assert terrain.count(before) == 1, "stale reach mutation: " + label
+        changed = terrain.replace(before, after, 1)
+        syntax = subprocess.run([luac, "-p", "-"], input=changed, capture_output=True, text=True)
+        assert syntax.returncode == 0, (label, syntax.stderr)
+        code, out = run_terrain_harness(changed)
+        assert code != 0 and "harness ok" not in out, "survived: %s\n%s" % (label, out)
+        print("  caught:", label, "-", _why(out))
+    code, out = run_terrain_harness()
+    assert code == 0, out
+    print("reach mutations: %d/%d caught; restored harness passes" % (len(mutations), len(mutations)))
+
+
+def check_drag_mutations():
+    """Dragging the map (2026-10-29): a camera move only places what is near the camera, the timed refresh
+    waits for the camera to stop, a change does not, and a road is converted to display positions and deduplicated once.
+    Each rule broken once; the terrain harness must fail."""
+    luac = LUA_EXE.replace("lua.exe", "luac.exe")
+    with io.open(TERRAIN_SRC, encoding="utf-8", newline="") as fh:
+        terrain = fh.read().replace("\r\n", "\n")
+    full = "if R.dirty or (R.stale and not moved) or not R.drawn then"
+    mutations = (
+        ("a camera move works the links out again", "if moved and R.drawn then", "if false then"),
+        ("the timed refresh runs mid-drag", full, "if R.dirty or R.stale or not R.drawn then"),
+        ("a change waits for the camera to stop", full, "if (R.stale and not moved) or not R.drawn then"),
+        ("the timed refresh never settles", "            R.dirty, R.stale = false, false\n", "            R.dirty = false\n"),
+        ("a road converted on every refresh", "    local d = R.shown_at[path]\n", "    local d = nil\n"),
+        ("shared stretches worked out on every move", "local visible = unshared[link]", "local visible = nil"),
+    )
+    for label, before, after in mutations:
+        assert terrain.count(before) == 1, "stale drag mutation: " + label
+        changed = terrain.replace(before, after, 1)
+        syntax = subprocess.run([luac, "-p", "-"], input=changed, capture_output=True, text=True)
+        assert syntax.returncode == 0, (label, syntax.stderr)
+        code, out = run_terrain_harness(changed)
+        assert code != 0 and "harness ok" not in out, "survived: %s\n%s" % (label, out)
+        print("  caught:", label, "-", _why(out))
+    code, out = run_terrain_harness()
+    assert code == 0, out
+    print("drag mutations: %d/%d caught; restored harness passes" % (len(mutations), len(mutations)))
+
+
+def check_map_cost_mutations():
+    """The map at a war or diplomatic event (2026-10-29): a shown road is given back unsearched while its land judges
+    the same, the network is bundled again only when a road changes or the player's turn starts, the cart goods'
+    previews are kept and renewed one seller at a time, and a refresh works out new reach answers for a time budget,
+    keeping an agreement's last line up until its answer is worked out (2026-10-30), and the shared stretches of a
+    network that came back unchanged. Each rule broken once; the terrain harness (or, for flows.lua, the flows
+    harness) must fail."""
+    luac = LUA_EXE.replace("lua.exe", "luac.exe")
+    with io.open(TERRAIN_SRC, encoding="utf-8", newline="") as fh:
+        terrain = fh.read().replace("\r\n", "\n")
+    kept = "if kept and kept.data == R.grid.data and R.unchanged(kept.regions, a, b) then"
+    show = "if open == nil and (R.shows == 0 or os.clock() < R.show_until) then"
+    mutations = (
+        ("kept road never checked", kept, "if kept and kept.data == R.grid.data then"),
+        ("kept road never given", kept, "if false then"),
+        ("kept road outlives its map", kept, "if kept and R.unchanged(kept.regions, a, b) then"),
+        ("a finished search keeps nothing",
+         "        if j.regions then R.kept[j.key] = { path = path or false, regions = j.regions, data = j.g.data } end\n", ""),
+        ("a search records no verdicts", "local avoid = R.avoider(a, b, regions)", "local avoid = R.avoider(a, b)"),
+        ("every event bundles the network again", "if not cached or #cached.raw~=#links then same=false end",
+         "same=false"),
+        ("the player's turn keeps the old network", "R.epoch, R.dirty, R.network_cache = R.epoch + 1, true, nil",
+         "R.epoch, R.dirty = R.epoch + 1, true"),
+        ("cart goods worked out every refresh", "local links, cargo, seen, owned, plans, used = {}, {}, {}, {}, R.plans, {}",
+         "local links, cargo, seen, owned, plans, used = {}, {}, {}, {}, {}, {}"),
+        ("cart goods never dropped",
+         "    for seller in pairs(plans) do if not used[seller] then plans[seller] = nil end end   -- renew only what is drawn\n", ""),
+        ("renewal stuck on one seller", "R.plan_next = (R.plan_next or 0) % #sellers + 1", "R.plan_next = 1"),
+        ("cart goods never renewed", "            R.renew_plan()   -- never on a tick that already refreshed\n", ""),
+        ("one reach answer a refresh whatever the time", show, "if open == nil and R.shows == 0 then"),
+        ("reach answers without a time budget", show, "if open == nil then"),
+        ("a line still to work out is dropped", "                                if was then open, road = was[1], was[2] end\n", ""),
+        ("a line with no answer yet is drawn", "if was then open, road = was[1], was[2] end",
+         "if was then open, road = was[1], was[2] else open = true end"),
+        ("the drawn answer is never kept",
+         "                            if open ~= nil then R.reach_shown[pair] = { open, road } end\n", ""),
+        ("an unchanged network has its shared stretches worked out again",
+         "unshared = R.drawn and R.drawn[1] == links and R.drawn[3] or {}", "unshared = {}"),
+        ("a changed network keeps the old shared stretches",
+         "unshared = R.drawn and R.drawn[1] == links and R.drawn[3] or {}", "unshared = R.drawn and R.drawn[3] or {}"),
+    )
+    for label, before, after in mutations:
+        assert terrain.count(before) == 1, "stale map cost mutation: " + label
+        changed = terrain.replace(before, after, 1)
+        syntax = subprocess.run([luac, "-p", "-"], input=changed, capture_output=True, text=True)
+        assert syntax.returncode == 0, (label, syntax.stderr)
+        code, out = run_terrain_harness(changed)
+        assert code != 0 and "harness ok" not in out, "survived: %s\n%s" % (label, out)
+        print("  caught:", label, "-", _why(out))
+    flows = flows_lua().replace("\r\n", "\n")
+    flows_mutations = (
+        ("a diplomatic event wipes the drawn roads", "        R.queue, R.queued = {}, {}\n",
+         "        R.cache, R.queue, R.queued = {}, {}, {}\n"),
+        ("a player's action leaves the map's cart goods", "    if R then R.plans, R.dirty = {}, true end\n", ""),
+        ("a computer faction's action redraws the map",
+         "function F.dispatch(fkey, parts)\n    if not F.is_human(fkey) then return end\n",
+         "function F.dispatch(fkey, parts)\n    if DERPY_MR_TERRAIN_ROUTES then DERPY_MR_TERRAIN_ROUTES.plans, "
+         "DERPY_MR_TERRAIN_ROUTES.dirty = {}, true end\n    if not F.is_human(fkey) then return end\n"),
+    )
+    for label, before, after in flows_mutations:
+        assert flows.count(before) == 1, "stale map cost mutation: " + label
+        code, out = run_harness(FLOWS_HARNESS, flows_text=flows.replace(before, after, 1))
+        assert code != 0 and "harness ok" not in out, "survived: %s\n%s" % (label, out)
+        print("  caught:", label, "-", _why(out))
+    code, out = run_terrain_harness()
+    assert code == 0, out
+    n = len(mutations) + len(flows_mutations)
+    print("map cost mutations: %d/%d caught; restored harnesses pass" % (n, n))
+
+
+def check_production_mutations():
+    """The Production tab (2026-10-30): each rule broken the way somebody would, in the shipped
+    stores script; the stores harness must fail on every one."""
+    subject = stores_lua().replace("\r\n", "\n")
+    mutations = (
+        ("every short input, not only admission's", 'local short = (type(have) == "number" and have < need) or st.short',
+         'local short = st.short'),
+        ("admission's own shortage without the view", 'local short = (type(have) == "number" and have < need) or st.short == "Short of " .. stem',
+         'local short = (type(have) == "number" and have < need)'),
+        ("a recipe left on where it cannot run", "if st.open or st.on then e.rows", "if st.open then e.rows"),
+        ("processing before services", "if da.kind ~= db.kind then return da.kind == \"processing\" end", ""),
+        ("the race's own buildings", 'if string.match(lk, "_" .. race .. "_") and string.match', 'if string.match'),
+        ("a chain's first level", ' and string.match(lk, "_1$") then', ' then'),
+        ("the actions switch", "off = not actions or (not st.open and not st.on)", "off = not st.open and not st.on"),
+        ("the grey row", "if #e.rows == 0 then v.rows[#v.rows + 1] = S.production_none(f, e.st) end", ""),
+        ("folding", "        if not folded then\n            if #e.rows == 0", "        if true then\n            if #e.rows == 0"),
+        ("on but short", 'return st.short == "Output store full" and "Store full" or "Short"', 'return "Paused"'),
+        ("a closed recipe's reason", 'return S.ECON_CLOSED[st.reason] or (st.on and "Paused" or "Off")',
+         'return st.on and "Paused" or "Off"'),
+        ("the tab's clicks", " or name == S.TAB.production", ""),
+        ("Gives names the good", "gives = d.output and result or", 'gives = d.output and (S.num(d.output[2]) .. " made") or'),
+        ("the view is asked for the recipe", 'S.ask("economy_view", f, r.region, d)', 'S.ask("economy_view", f, r.region, st)'),
+        ("a shortage said once", 'string.sub(c.reason, 1, 9) ~= "Short of "', "true"),
+        ("Gives' icon", "price = {},\n                  lead = { [2] = c.gives_icon } }", "price = {} }"),
+        ("Gives' icon after the inputs'", "local ld = leads[k - np]", "local ld = nil"),
+        ("a greyed row's Gives icon", '(pk and pk.short or rc.dim) and "off"', 'pk and pk.short and "off"'),
+    )
+    for label, before, after in mutations:
+        assert subject.count(before) == 1, "stale production mutation: " + label
+        changed = subject.replace(before, after, 1)
+        # UTF-8 on the pipe: the stores script carries a non-cp1252 arrow (a route's summary)
+        syntax = subprocess.run([LUA_EXE.replace("lua.exe", "luac.exe"), "-p", "-"],
+            input=changed, capture_output=True, text=True, encoding="utf-8")
+        assert syntax.returncode == 0, (label, syntax.stderr)
+        code, out = run_harness(HARNESS, stores_text=changed)
+        assert code != 0 and "in function" in out and "syntax" not in out, "survived: %s\n%s" % (label, out)
+        print("  caught:", label)
+    code, out = run_harness(HARNESS)
+    assert code == 0, out
+    print("production mutations: %d/%d caught; restored harness passes" % (len(mutations), len(mutations)))
+
+
 def check_layout():
     """Every box inside the panel; headers, list and hint in order; columns clear of each
     other and of the slider. A box that leaves the panel draws over the map."""
     W, H = L["W"], L["H"]
     for k in ("title", "title_rule", "close", "tab_goods", "tab_settlements", "tab_trade", "tab_spending",
-              "tab_map", "tab_workshop", "back",
+              "tab_map", "tab_workshop", "tab_production", "back",
               "sub_title", "list", "empty", "hint", "cards", "escort_line"):
         x, y, w, h = L[k]
         assert 0 <= x and 0 <= y and x + w <= W and y + h <= H, "%s leaves the panel" % k
@@ -1692,12 +1894,32 @@ def check_layout():
     assert L["head_y"] + 22 <= ly and ly + lh <= L["bulk"][1], "headers, list and buttons overlap"
     assert L["hint"][:2] == L["sub_title"][:2], "the hint has left the sub-title's line"
     assert L["tab_trade"][0] >= L["tab_settlements"][0] + L["tab_settlements"][2], "the tabs overlap"
-    tabs = [L[k] for k in ("tab_goods", "tab_settlements", "tab_trade", "tab_spending", "tab_map", "tab_workshop")]
+    tabs = [L[k] for k in ("tab_goods", "tab_settlements", "tab_trade", "tab_spending", "tab_map", "tab_workshop",
+                           "tab_production")]
     for a, b in zip(tabs, tabs[1:]):
         assert b[0] >= a[0] + a[2], "the tabs overlap"
+        assert (b[1], b[3]) == (a[1], a[3]), "the tabs are not on one line at one height"
     assert L["back"][0] >= tabs[-1][0] + tabs[-1][2], "back overlaps a tab"
-    for view in ("workshop", "workshop_focus"):   # Buy in the fifth column
-        assert L["send"][0] <= L["VIEWS"][view][4][1], "Buy overruns %s's last column" % view
+    for view in ("workshop", "workshop_focus", "production"):   # Buy, Enable or Pause in the fifth column
+        assert L["send"][0] <= L["VIEWS"][view][4][1], "the button overruns %s's last column" % view
+    # THE PRODUCTION TAB'S INPUTS: the most goods a recipe takes, as the price strip from column 3,
+    # end before the State column; the gives and the state each fit theirs
+    import gen_resource_overhaul as G
+    pc = L["VIEWS"]["production"]
+    recipes = dict(G.PROCESSING, **G.SERVICES)
+    most = max(len(d["cost"]) for d in recipes.values())
+    assert most <= L["USING"], "a recipe takes more goods than a row has icons"
+    assert pc[2][0] + most * L["PRICE_PITCH"] <= pc[3][0], "a recipe's inputs run into the State column"
+    for d in recipes.values():
+        for n in d["cost"].values():
+            assert CHAR_W * len(str(n)) <= L["PRICE_PITCH"] - L["ICON_PITCH"], "an input amount %d does not fit" % n
+    names = dict((s, n) for s, (_r, _f, n) in G.store_stems().items())
+    gives = ["%d %s" % (d["output"][1], names[d["output"][0]]) for d in G.PROCESSING.values()]
+    gives += ["+2 control", "+5 growth", "-5% cost", "+3% replen."]
+    for t in gives:   # after its icon
+        assert L["ICON_PITCH"] + CHAR_W * len(t) <= pc[1][1], "%r overflows the Production tab's Gives" % t
+    for t in ("None of your settlements", "No workshop", "Capital only", "Switched off", "Store full", "Next turn"):
+        assert CHAR_W * len(t) <= (pc[0][1] if t.startswith("None") else pc[3][1]), "%r overflows its column" % t
     # EVERY WORKSHOP ROW'S TEXT FITS ITS COLUMN: the name, the short line, and each price part
     # after its icon (a part's figure starts ICON_PITCH in)
     import gen_resource_overhaul as G
@@ -1830,7 +2052,7 @@ def check_button_faces():
     import gen_resource_overhaul as G
     buttons = [(L["tab_goods"], ("Resources",)), (L["tab_settlements"], ("Settlements",)),
                (L["tab_trade"], ("Trade",)), (L["tab_spending"], ("Spending",)), (L["tab_map"], ("Map",)),
-               (L["tab_workshop"], ("Workshop",)),
+               (L["tab_workshop"], ("Workshop",)), (L["tab_production"], ("Production",)),
                (L["back"], ("Back",)),
                (L["bulk"], ["Allow all exports", "Stop all imports", "Sell surplus"] + [o[4] for o in G.ORDERS]),
                ((0, 0) + L["send"], ("Send here", "Show", "Buy", "Buy here", "Forged", "Built", "Choose", "Enable", "Pause"))]
@@ -1893,6 +2115,9 @@ def check_xml():
         assert ev.lower() in reg, "the %s purchase sound %s is not in CA's sound registry" % (kind, ev)
     for use, icon in USE_ICON.items():   # the Workshop's price cell
         assert "ui/campaign ui/effect_bundles/" + icon in have, "no icon for the %s price: %s" % (use, icon)
+    import gen_resource_overhaul as G
+    for key, d in G.SERVICES.items():    # the Production tab's Gives, by the service's own bundle icon
+        assert "ui/campaign ui/effect_bundles/" + d["icon"] in have, "no icon for the %s service: %s" % (key, d["icon"])
 
 
 def selftest():
@@ -1936,6 +2161,10 @@ def selftest():
     check_convoy_mutations()
     check_map_road_mutations()
     check_cargo_view_mutations()
+    check_reach_mutations()
+    check_drag_mutations()
+    check_map_cost_mutations()
+    check_production_mutations()
     # the Lua builds derpy_mr_store_<stem>_<kind> from FLOW_KIND; those must be Task 2's junctions
     assert set(FLOW_KIND.values()) == {k for k, _p, _n in G.FLOW_FACTORS}, FLOW_KIND
     assert G.flow_junction("coal", "raided") == "derpy_mr_store_coal_raided"

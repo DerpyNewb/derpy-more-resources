@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-31
+
+- Vault: Production tab. Every processing recipe and service your race has, and the settlements that run each.
+- Production: each recipe's output with its icon, inputs in red where a settlement is short, Enable or Pause.
+- Production: a recipe no settlement can run names the buildings that would run it.
+- Settlement view: a short recipe reads Short, not Paused; one that cannot run says why.
+
+## 2026-10-30
+
+- Agreement trade sends at least 1 of a good while the store has any to spare.
+- Computer workshops and services get a cart of their missing inputs from their own other stores.
+- Wars and treaties no longer slow the computers' turns with map redraws.
+- Trade switches, stock rules and sales show on the map's carts at once.
+
+## 2026-10-29
+
+- Faster computer turns: trade reach is worked out again only where land changed.
+- No frame skip when dragging the campaign map.
+- Hub button comes back if something else hid it while you were on the map.
+
 ## 2026-10-25
 
 - Fixed: braziers, magic and the Hell-Forge fire drew as flat squares with the mod on.

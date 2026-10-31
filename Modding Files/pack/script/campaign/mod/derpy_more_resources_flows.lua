@@ -689,8 +689,9 @@ function F.invalidate_reach()
     F.reach_known = {}
     local R = DERPY_MR_TERRAIN_ROUTES
     if R then
-        R.cache, R.queue, R.queued = {}, {}, {}
-        R.network_cache = nil
+        -- the map checks its roads again (R.path gives back those whose land still judges the same) and keeps
+        -- the old lines up meanwhile; searches under way start again on today's verdicts
+        R.queue, R.queued = {}, {}
         R.epoch = (R.epoch or 0) + 1
         R.dirty = true
     end
@@ -790,7 +791,8 @@ function F.trade(exporter, preview)
                 if not F.stopped(exporter:name(), "export", g.stem)
                     and not F.stopped(partner:name(), "import", g.stem) then
                     local source, removable = F.cheapest_store(sources, g.stem)
-                    local n = math.min(math.floor(removable * pct / 100), F.import_need(dest, g.stem))
+                    -- at least 1 (author, 2026-10-30): floored, 226 of 441 computer goods on open roads moved nothing
+                    local n = math.min(F.share(removable, pct), F.import_need(dest, g.stem))
                     if source and n > 0 then
                         -- uphill only: the destination's price must clear the source's price plus the spread
                         local ps, pd = F.local_price(source, g.stem, exporter:name()), F.local_price(dest, g.stem, partner:name())
@@ -1214,7 +1216,7 @@ function F.economy_named(faction, region)
 end
 
 -- Services spend their own basket reserve; processing spends only removable stock.
-function F.economy_admit(faction, region, d, batches)
+function F.economy_view(faction, region, d)
     local v = F.stock_view(faction, region)
     if d.kind == "services" then
         v.named = {}
@@ -1227,10 +1229,19 @@ function F.economy_admit(faction, region, d, batches)
             v.auto_keep[use] = math.max(0, base * F.FED_TURNS)
         end
     end
+    return v
+end
+
+function F.economy_stems(d)
     local stems = {}
     for stem in pairs(d.cost) do stems[#stems + 1] = stem end
     table.sort(stems)
-    for _, stem in ipairs(stems) do
+    return stems
+end
+
+function F.economy_admit(faction, region, d, batches)
+    local v = F.economy_view(faction, region, d)
+    for _, stem in ipairs(F.economy_stems(d)) do
         local n = d.cost[stem] * (batches or 1)
         if F.available_stock(v, stem) < n then return false, "Short of " .. stem end
         F.stock_adjust(v, stem, -n)
@@ -1284,6 +1295,15 @@ function F.economy_clear(region)
     end
 end
 
+-- A computer runs a batch only while the output is under its Target, else two batches or its use's auto target.
+function F.economy_wanted(v, d)
+    if not d.output then return true end
+    local stem = d.output[1]
+    local target = v.policy[stem].target
+    if target == nil then target = math.max(d.output[2] * 2, v.auto_target[F.GOOD[stem].use] or 0) end
+    return (v.held[stem] or 0) + (v.incoming[stem] or 0) < target
+end
+
 function F.economy_turn(faction)
     local keys = {}
     for key in pairs(DERPY_MR_FLOWS_ECONOMY) do keys[#keys + 1] = key end
@@ -1307,16 +1327,7 @@ function F.economy_turn(faction)
                             and F.rates()[kind] and F.economy_open(faction, region, d)
                         local on = b and b.orders[key] == true
                         if not faction:is_human() and open then
-                            on = F.economy_admit(faction, region, d, 2)
-                            if on and d.output then
-                                local view = F.stock_view(faction, region)
-                                local stem = d.output[1]
-                                local target = view.policy[stem].target
-                                if target == nil then
-                                    target = math.max(d.output[2] * 2, view.auto_target[F.GOOD[stem].use] or 0)
-                                end
-                                on = (view.held[stem] or 0) + (view.incoming[stem] or 0) < target
-                            end
+                            on = F.economy_admit(faction, region, d, 2) and F.economy_wanted(F.stock_view(faction, region), d)
                             if on then
                                 b = F.economy_book(region:name(), true, faction:name())
                                 b.done, b.orders[key] = turn, true
@@ -1326,6 +1337,57 @@ function F.economy_turn(faction)
                         if open and on and F.economy_admit(faction, region, d) and F.economy_pay(faction, region, d) then
                             b.paid[key] = turn
                         end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- WORKSHOP INPUTS (author, 2026-10-30): a computer's open workshop or service that cannot pay two batches
+-- gets a cart from its fullest other store, filled to SHIP.ai_on batches, as army relief ships food. Every
+-- short input must have a store that can close its gap, or fill a cart, or no cart goes: half a recipe
+-- would sit there unused. A full cart is allowed short because a running order also reserves FED_TURNS
+-- batches, which can need more than one cart. It runs after relief and the province supplies, whose
+-- one-cart cap it shares.
+function F.economy_supply(faction)
+    local rates = F.rates()
+    if faction:is_human() or not rates.ai or not F.uses_stores(faction) then return end
+    if F.ship_count(faction:name()) >= F.ship_cap(faction) then return end
+    local keys, regions, views = {}, {}, nil
+    for key in pairs(DERPY_MR_FLOWS_ECONOMY) do keys[#keys + 1] = key end
+    table.sort(keys)
+    local rl = faction:region_list()
+    for i = 0, rl:num_items() - 1 do regions[#regions + 1] = rl:item_at(i) end
+    table.sort(regions, function(a, b) return a:name() < b:name() end)
+    for _, region in ipairs(regions) do
+        for _, kind in ipairs({ "processing", "services" }) do
+            for _, key in ipairs(keys) do
+                local d = DERPY_MR_FLOWS_ECONOMY[key]
+                if d.kind == kind and rates[kind] and F.economy_open(faction, region, d) then
+                    local v = F.economy_view(faction, region, d)
+                    local plan = F.economy_wanted(v, d) and {} or nil
+                    for _, stem in ipairs(plan and F.economy_stems(d) or {}) do
+                        local have = F.room(v, stem) + (v.incoming[stem] or 0)
+                        local short = d.cost[stem] * 2 - have
+                        if short > 0 then
+                            views = views or F.stock_views(faction)
+                            local sources = {}
+                            for _, s in ipairs(views) do
+                                if s.region:name() ~= region:name() then sources[#sources + 1] = s end
+                            end
+                            local source, removable = F.fullest(sources, stem)
+                            local free = (v.capacity[stem] or 0) - (v.held[stem] or 0) - (v.incoming[stem] or 0)
+                            local fit = source and F.fit_delivery(math.min(removable, F.CART_MAX),
+                                math.min(F.SHIP.ai_on * d.cost[stem] - have, free))
+                            if not fit or fit.got < math.min(short, F.CART_MAX - F.lost(F.CART_MAX)) then plan = nil; break end
+                            plan[#plan + 1] = { source = source, stem = stem, n = fit.n }
+                        end
+                    end
+                    for _, p in ipairs(plan or {}) do
+                        local ship = F.ship(faction, p.source.region, region, p.stem, p.n)
+                        if ship then F.stock_adjust(p.source, p.stem, -ship.gross) end
+                        if F.ship_count(faction:name()) >= F.ship_cap(faction) then return end
                     end
                 end
             end
@@ -1459,16 +1521,18 @@ function F.stock_view(faction, region, provinces)
     return v
 end
 
-function F.available_stock(v, stem)
+-- What `v` holds of `stem` past its Keep and reserves: negative while they are not covered.
+function F.room(v, stem)
     local g, held = F.GOOD[stem], v.held[stem] or 0
     if not g then return 0 end
     local keep = (v.policy[stem] or {}).keep
-    if keep ~= nil then return math.max(0, held - keep) end
+    if keep ~= nil then return held - keep end
     if g.rare then return held end
     local named = (v.named or v.recurring.named or {})[stem] or 0
-    return math.max(0, math.min(held - F.FED_TURNS * named,
-        (v.totals[g.use] or 0) - (v.auto_keep[g.use] or 0)))
+    return math.min(held - F.FED_TURNS * named, (v.totals[g.use] or 0) - (v.auto_keep[g.use] or 0))
 end
+
+function F.available_stock(v, stem) return math.max(0, F.room(v, stem)) end
 
 function F.import_need(v, stem)
     local g = F.GOOD[stem]
@@ -2687,6 +2751,10 @@ end
 F.ACTIONS = { send = 3, order = 2, sell = 2, supply = 3, work = 2, upgrade = 3, aim = 3, found = 2, economy = 3, provisions = 3, route_new = 6, route_ctl = 3, route_edit = 4 }
 function F.dispatch(fkey, parts)
     if not F.is_human(fkey) then return end
+    -- the map's cart goods come from kept trade previews (terrain_routes.lua R.plans): an action shows on its
+    -- next tick, not once that seller's renewal comes round (2026-10-30: a re-allowed export took 6.3 s)
+    local R = DERPY_MR_TERRAIN_ROUTES
+    if R then R.plans, R.dirty = {}, true end
     local a = parts[1]
     if F.DIRS[a] then
         if #parts == 2 then F.apply(fkey, a, parts[2]) end
@@ -4040,6 +4108,7 @@ function F.on_faction_turn_start(faction)
     F.guard(F.provision_supply, faction)
     F.guard(F.supply, faction)
     F.guard(F.economy_turn, faction)
+    F.guard(F.economy_supply, faction)
     F.guard(F.routes_turn, faction)
     -- guarded: the trade debits through F.route_goods, which can throw, and the duty after it must still run
     F.guard(F.trade, faction)

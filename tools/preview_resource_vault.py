@@ -24,6 +24,7 @@ import importlib.util
 import io
 import math
 import os
+import re
 import sys
 import tempfile
 
@@ -32,7 +33,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import preview_guilds_panel as PG                                    # noqa: E402
 
 PREFIX = "derpy_mr_stores_"
-TABS = ("goods", "goods_focus", "settlements", "settlement_focus", "economy", "army", "army_mobile", "route", "route_partner", "route_offer", "found", "trade", "trade_focus", "spending", "escort", "workshop", "workshop_focus", "workshop_folded", "map",
+TABS = ("goods", "goods_focus", "settlements", "settlement_focus", "economy", "army", "army_mobile", "route", "route_partner", "route_offer", "found", "trade", "trade_focus", "spending", "escort", "workshop", "workshop_focus", "workshop_folded", "production", "map",
         "map_wh3_main_combi", "map_cr_combi_expanded", "map_wh3_main_chaos")
 # Where a campaign's minimap is: CA's data_maps.pack, or the map mod's own pack (IEE).
 MAP_PACKS = (os.path.join(PG.GAME, "data_maps.pack"),
@@ -40,6 +41,10 @@ MAP_PACKS = (os.path.join(PG.GAME, "data_maps.pack"),
                           "3007996493", "!cr_immortal_empires_expanded.pack"))
 SCREEN = (1920, 1080)
 FONT = "C:/Windows/Fonts/segoeui.ttf"
+# THE COLOURS THE PANEL'S [[col:]] NAMES, CA's own out of db/ui_colours_tables: red is the Iron Court
+# preview's FF2D2D, the two greys as stores_panel.lua's S.GREY and S.BEIGE record them
+MARKUP_COLOUR = {"red": (0xFF, 0x2D, 0x2D, 255), "ui_font_inactive_grey": (102, 102, 102, 255),
+                 "ui_font_faded_grey_beige": (169, 159, 137, 255)}
 
 
 def _gen():
@@ -184,8 +189,11 @@ def render(tab, comps, docs, path=None):
             tw = draw.textlength(plain, font=f)
             align = (c["halign"] or ct.get("texthalign") or "Left").lower()
             x = c["x"] if align == "left" else (c["x"] + w - tw if align == "right" else c["x"] + (w - tw) / 2)
-            draw.text((max(x, c["x"]), c["y"] + (h - size) / 2 - 3), plain, fill=_rgba(ct.get("font_m_colour")),
-                      font=f)
+            # A WHOLE CELL IN [[col:]] is drawn in that colour: the short price, the grey row, the section label
+            tag = re.match(r"\[\[col:(\w+)\]\]", c["text"])
+            fill = MARKUP_COLOUR.get(tag.group(1)) if tag else None
+            draw.text((max(x, c["x"]), c["y"] + (h - size) / 2 - 3), plain,
+                      fill=fill or _rgba(ct.get("font_m_colour")), font=f)
         if comp.get("clipchildren") == "true":
             stack.append((c["depth"], (c["x"], c["y"], w, h), Image.new("RGBA", SCREEN, (0, 0, 0, 0))))
     close_to(0)

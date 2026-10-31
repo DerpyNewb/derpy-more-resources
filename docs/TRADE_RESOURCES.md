@@ -2074,3 +2074,130 @@ Built from the [design](superpowers/specs/2026-10-23-resource-overhaul-local-pri
 Main `74088FE5` (from `EEB009EE`), in `data/` and `Modpacks/`, no Workshop item; the flows, stores and route runtimes and the MCT settings file changed, the other 7,290 files are byte-identical. An agreement's goods no longer jump to the partner: each turn, what an exporter sends one partner leaves as one convoy on the road the reach check found, at 40 hexes a turn (1 turn up to the trade reach), and lands in the buyer's capital up to its free space. It turns back when the treaty ends or the buyer dies, an army at war with the exporter within 3 hexes of it at the exporter's turn start seizes it, and a dead exporter's convoys vanish. Cargo on the road counts as incoming, so a partner is not sent the same shortfall every turn. Shipments now take their road's length in hexes too; road length counts a sea or river crossing at its whole span. The Trade tab gets a Cargo on the road row, the good drill-down lists convoy cargo, and both maps draw convoy markers (the 3D map only near the camera). The turn shown is when the buyer first has the goods, a turn after the landing for a player buying from a computer.
 
 Built from the [design](superpowers/specs/2026-10-23-resource-overhaul-local-prices-and-road-trade-design.md) and [plan](superpowers/plans/2026-10-23-resource-overhaul-agreement-cargo.md) in six reviewed tasks and a whole-plan review whose seven findings were fixed and re-reviewed. Offline: three harnesses, 219 mutants caught, 0 literal-left sites, 22 Vault previews. Checked in game the same day ([live check](sessions/LIVE_TEST_20261024_LOCAL_PRICES_AND_CARGO.md)): convoys move along their roads, land exactly, one was seized by a parked enemy army, and the convoy list is identical across a save and reload; markers draw on both maps and none through the shroud. Open: a convoy keeps the road it left on, so after a road change its 3D marker can sit off the drawn road (17 hexes once). Agreement trade took 8.4 to 10.6 s a round against 7.6 s, nearly all of it the unchanged reach search. [Rules](RESOURCE_OVERHAUL_MECHANICS.md#cargo-on-the-road-2026-10-24).
+
+## 53. Kept reach answers, 2026-10-29
+
+Main `E452E71B` (from `B05E0CF8`), in `data/` and `Modpacks/`, no Workshop item; only the route runtime changed, the other 7,293 files are byte-identical. The reach search (8.03 s of the computers' 8.40 s of trade in the 10-24 round 6) now runs only when its answer could have moved. No rule, answer or road changes.
+
+- **Kept answers.** `R.reach` files each road's answer (keyed by its two ends and the reach) with the verdict of every region its walled search looked at, and gives it again while every one of them still judges the same (`R.unchanged`). A search is a function of the terrain and those verdicts, so a kept answer is the one a new search would give, and machines agree whatever each has kept. Land changing hands is just a region whose verdict is asked again, so no event has to be heard for it. Not saved: the first round after a load searches everything.
+- **The road through hostile land** (the one that only decides "enemy" or "far") depends on terrain alone. It runs, as before, only when the walled search fails, and is kept for the campaign. A pair with no road even through hostile land then answers "far" without a walled search, but only if that search ran to its end: one that stopped at `R.SEARCH_CAP` (200,000 hexes, now a named value) proves nothing.
+- **A region is judged once per search** instead of once per hex, so a hex costs 3 game calls instead of 5. This helps every search, including the Vault's and the road bundling's.
+- **The open list is a heap in three arrays**, so a push makes no table, and the A* loop reads its fields into locals. It runs the same comparisons, so it pops the same hexes in the same order.
+
+Measured offline with `Modding Files/Backup/reach_memo_20261029/reach_bench.lua`: the real Immortal Empires grid, a stub world of 14-hex regions held by 40 factions, 120 pairs at 240 hexes (28 far, 59 enemy, 33 open), and every game call counted.
+
+| Round | Before | After |
+|---|---|---|
+| Cold (first after a load) | 9,683 ms, 2,840,726 calls | 7,391 ms, 1,738,252 calls |
+| Nothing changed | 7,683 ms, 2,840,726 | 44 ms, 54,782 |
+| One war changed | 7,551 ms, 2,829,940 | 120 ms, 90,198 |
+| Two regions changed hands | 7,715 ms, 2,832,766 | 80 ms, 73,569 |
+
+Every round's answers, road lengths and mid-road hexes digest-identical to the old code. The harness gained the kept-answer cases (unchanged, war on the detour, peace, another friend, no such region, a shorter reach, a changed map) and a capped-search map. `gen_mr_ui.py --selftest` gained `check_reach_mutations`: 11 mutants, all caught, with every other suite still passing. Luac, API, literal-left and undeclared checks are clean. The pre-change pack and source are in the same backup folder, beside `update_reach_memo.py`.
+
+**In game, 2026-10-29** ([live check](sessions/LIVE_TEST_20261029_REACH_MEMO_AND_DRAG.md)), on the 10-24 fixture:
+
+| Round | Turn handlers | Reach |
+|---|---|---|
+| First after a load | 6.19 s (was 12.4 to 14.5 s on 10-24) | 3.37 s (was 8.03 s) |
+| Next | 4.20 s | 0.94 s |
+
+The player's own turn start fell from 0.68 s to 0.10-0.15 s. All 119 kept answers matched a fresh search, and there were no script errors.
+
+## 54. Map redraw while dragging, 2026-10-29
+
+The author saw a frame skip whenever they dragged the map. The route map's 0.1 s tick ran a full refresh, about 40 ms (27 of them trade previews for the cart goods), on every camera move and every 2.5 s. Now a camera move reuses the last refresh's links, cargo and shared-stretch dedupe, and only places what is near the camera. A road's display positions are converted once, and the timed refresh waits until the camera is still. A camera-move refresh measured 3.3 ms in game, hot-loaded. Harness drag cases and `check_drag_mutations` (6 of 6 caught). Main `7A755835` (from `E452E71B`), in `data/` and `Modpacks/`, no Workshop item; only the route runtime changed, the other 7,293 files are byte-identical. Measured hot-loaded; the packed build has not been run. Update script, pre-change pack and probe in `Modding Files/Backup/drag_refresh_20261029/` (the script is on RPFM 5.3's v2 tools; the v1 names in `update_reach_memo.py` are gone). Open: the full refreshes during the computers' turns (9 to 12 s a round, one per diplomatic event) and the 2.5 s timer's full refresh with a still camera. Both were dealt with in §55. [Live check](sessions/LIVE_TEST_20261029_REACH_MEMO_AND_DRAG.md).
+
+## 55. Route map during the computers' turns, 2026-10-30
+
+Main `B644777C` (from `7A755835`), then `9EBB2731` (the trade-switch fix below, flows runtime only), in `data/` and `Modpacks/`, no Workshop item. Only the flows and route runtimes changed; every other file is byte-identical. No rule, trade answer or road changes. This is display work only.
+
+Every war, diplomatic event and change of hands (`F.invalidate_reach`) used to throw away the map's drawn roads and queue a new search for each one. Each event also forced a full refresh that bundled the whole network again and worked out every cart's goods from trade previews. Now:
+
+- **Kept roads.** `R.path` gives a shown road back unsearched while every region its search looked at still judges the same. This is the `R.reach` proof applied to the map's roads (`R.kept`, checked whenever `R.epoch` moves). A changed road keeps its old line up until the new search lands, and searches under way start again on today's verdicts.
+- **Bundling.** The network is bundled again only when a road or a link changes, and at the player's turn (`R.new_turn`). A war that touches only the corridor around a road, and not the road itself, shows from the next turn.
+- **Kept previews.** Cart goods previews stay in `R.plans`, and one seller is renewed every `R.PLAN_EVERY` (5) ticks, on ticks that did not refresh. Sellers no longer drawn are dropped.
+- **Time budget.** A refresh works out new reach answers for `R.SHOW_BUDGET` (4 ms), and always at least one. Any left over set `R.dirty` for the next tick.
+- **Pending answers.** An agreement whose answer is still to be worked out keeps its last line (`R.reach_shown`). This was found in game: every diplomatic event clears the reach answers, the agreements waiting for theirs dropped off the map, and each partial set re-bundled the network, up to 407 ms a refresh.
+- **Shared stretches.** A full refresh reuses the last dedupe when `R.network` gives back its cached table.
+- **Player actions (`9EBB2731`).** Any action through `F.dispatch` drops the kept previews and redraws on the next tick: trade switches, stock rules, sales and orders. This was found when the author asked about the panel's trade switches: in `B644777C` a re-allowed export took 6.3 s to come back on the carts, waiting for its seller's renewal. The map now follows a switch within 0.1 s, both ways and for the bulk buttons, where the 2.5 s timer used to set the pace.
+
+In game ([live check](sessions/LIVE_TEST_20261030_MAP_COST.md)), on the 10-24 fixture:
+
+| | 10-29 (`7A755835`) | This build |
+|---|---|---|
+| Route refreshes, computers' turns | 9.4 to 12.3 s a round | 0.74 s (61 full, 45 camera moves) |
+| Network rebuilds, computers' turns | one per event | 1 (a link that changed) |
+| Whole end of turn | 48.5 / 47.9 s | 33.6 s |
+| Still camera, timed full refresh | 37 to 62 ms | 8.6 ms mean, 10 ms worst |
+
+All 131 kept reach answers matched a fresh search, and every drawn line matched its answer. No script errors.
+
+The map's own kept roads were not exercised in game, because the fixture has no contract routes, the only links without a road of their own. The terrain harness covers them. `check_map_cost_mutations`: 21 of 21 caught, with every other suite still passing.
+
+Every switch was checked through the panel's own buttons, and its economic effect one turn later ([live check](sessions/LIVE_TEST_20261030_MAP_COST.md#trade-switches-through-the-panel-second-launch)). `B644777C` and `9EBB2731` were both run packed, the latter for two rounds of a computer-faction census, with no errors. The `F.dispatch` fix itself was measured hot-loaded. The census found that the computer factions eat, pay province supplies, ship, raid and build rare production, but buy nothing from the Workshop and run no processing this early. It also found that half their trade is lost to the 5% share rounding down. None of that changed here; §56 takes up the share and the workshop inputs.
+
+The update scripts, pre-change packs, probe, hot-loads and raw rounds are in two folders:
+
+- `Modding Files/Backup/map_cost_20261029/`
+- `Modding Files/Backup/switch_refresh_20261030/`
+
+Still open: the re-bundle at the player's turn start (117 ms) and when a link changes mid-round (100 to 150 ms), and `R.animate` at about 1.7 ms a tick.
+
+## 56. Computer trade and workshop inputs, 2026-10-30
+
+Main `55C56883` (from `9EBB2731`), in `data/` and `Modpacks/`, no Workshop item. Only the flows runtime changed; the other 7,293 files are byte-identical. These are two balance changes the author chose after the §55 census:
+
+- **At least 1.** Agreement trade now sends `F.share(removable, pct)`: 5% of what the store can spare, rounded down, but never less than 1 while it has any to spare. With plain rounding down, 226 of the 441 computer goods with spare stock on open roads moved nothing. The player's exports follow the same rule.
+- **Workshop inputs by cart (`F.economy_supply`).** A computer's open processing recipe or service sometimes cannot pay two batches from its own store. If its output is still under target, it gets a cart from the faction's fullest other store, the way army relief ships food. The cart is filled toward ten batches (`F.SHIP.ai_on`). Every short input needs a store that can close its gap or fill a whole cart, or no cart goes, because half a recipe would sit there unused. The routine runs at turn start, after relief and the province supplies, and shares their one-cart limit. The player is never sent one.
+
+Measured in game on the 10-24 fixture, rounds 3 and 4, with nothing forced ([raw rounds](../Modding%20Files/Backup/economy_carts_20261030/census_rounds.txt)):
+
+| | `9EBB2731` | `55C56883` |
+|---|---|---|
+| Convoys between computer factions, round 3 | 6 | 23 (79 units) |
+| Convoys between computer factions, round 4 | 10 (34 units) | 42 (107 units) |
+| Computer factions trading, round 3 / 4 | - | 19 / 28 |
+| Input carts sent, round 3 / 4 | - | 0 / 0 (0.30 / 0.24 s a round) |
+| Computer Workshop purchases | 0 | 0 |
+
+No carts went because, at turn 4, the computers hold almost none of the inputs anywhere. The guard did not block them:
+
+| Input | Shortfalls | No other store holds any |
+|---|---|---|
+| Cloth | 314 | 258 |
+| Medicine | 170 | 168 |
+| Tools | 169 | 166 |
+| Leather | 161 | 157 |
+
+So this early the cart has little to move. Whether it moves anything later in a campaign is not measured. A soak toward turn 25 for that census reached turn 13 and was stopped at the author's request. It showed no script errors from the mod, only CA's character-initiative listener warnings.
+
+The trade-switch fix from §55 was also clicked on the packed build. Stopping the dragon bone export and allowing it again both reached the map within one 0.1 s sample.
+
+Harness cases cover the share of 1, and the cart in each case where it must not go:
+- output not wanted;
+- processing off;
+- a human faction;
+- too little at the source;
+- a second cart while one is on the road;
+- half a recipe.
+
+They also cover the cases where it must go: a full grain cart lands and the brewery runs, and a turn start sends the cart. `check_economy_mutations`: 41 of 41 caught. The update script, the pre-change pack, the census add-on and the raw rounds are in `Modding Files/Backup/economy_carts_20261030/`.
+
+Still open: the later-game census, which covers carts and Workshop purchases once the computers hold inputs and rare goods.
+
+## 57. The Vault's Production tab, 2026-10-31
+
+Main `7416514A` (from `55C56883`), in `data/` and `Modpacks/`, no Workshop item. Only the stores runtime and `derpy_mr_stores_panel.twui.xml` changed; the other 7,292 files are byte-identical.
+
+A seventh Vault tab lists every processing recipe and service the player's race has, realm-wide. Before this, they showed only inside one settlement's stores. Each recipe is one foldable section with a row per settlement that can run it or still has it ordered. A row shows:
+
+- the settlement;
+- what the recipe gives, after its icon;
+- each input's amount, red where that settlement cannot spend a batch's worth (`F.economy_view` / `F.available_stock`, so every short input, not only admission's first);
+- its state;
+- Enable or Pause, through the settlement view's request door.
+
+A recipe nobody can run gets one grey row, whose tooltip names the race's buildings that run it. The settlement view now uses the same state words, so an ordered recipe that is short reads `Short`, not `Paused`.
+
+The write-up is [PRODUCTION_TAB_20261030.md](sessions/PRODUCTION_TAB_20261030.md). Not run in game: tab glyph widths, the red amounts, the Gives icons on screen, and a live Enable/Pause click are open.

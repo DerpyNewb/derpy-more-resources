@@ -535,7 +535,7 @@ def selftest():
 
 
 def probe_pack():
-    from rpfm_client import call
+    from rpfm_client import call, db as db_kind, ensure_game, new_pack
     folder = ROOT / 'Modding Files/Backup/terrain_routes_20261021/probe'
     folder.mkdir(parents=True, exist_ok=True)
     version, cols, rows = scene_rows()
@@ -543,19 +543,18 @@ def probe_pack():
     tsv = folder / 'scenes.tsv'
     tsv.write_text('\t'.join(cols) + '\n#' + table + ';' + str(version) + ';db/' + table + '/' + frag + '\n'
                    + '\n'.join('\t'.join(str(r[c]) for c in cols) for r in rows) + '\n', encoding='utf-8')
-    call('set_game_selected', {'game_name': 'warhammer_3', 'rebuild_dependencies': False})
-    key = call('new_pack', {})['String']
-    assert call('is_schema_loaded', {})['Bool']
+    ensure_game()
+    key = new_pack()
     path = 'db/' + table + '/' + frag
-    call('new_packed_file', {'pack_key': key, 'path': path, 'new_file': json.dumps({'DB': [frag, table, version]})})
-    call('import_tsv', {'pack_key': key, 'table_path': path, 'tsv_path': str(tsv)})
+    call('create_file', {'pack': key, 'path': path, 'kind': db_kind(table, version)})
+    call('import_tsv', {'pack': key, 'path': path, 'tsv_path': str(tsv)})
     for path, data in assets().items():
         local = folder / path
         local.parent.mkdir(parents=True, exist_ok=True)
         local.write_bytes(data)
-        call('add_packed_files', {'pack_key': key, 'source_paths': [str(local)], 'destination_paths': json.dumps([{'File': path}])})
+        call('add_files_from_disk', {'pack': key, 'paths': [str(local)], 'pack_paths': [path]})
     dest = ROOT / 'Modding Files/Modpacks/derpy_mr_route_probe.pack'
-    call('save_pack_as', {'pack_key': key, 'path': str(dest)})
+    call('save_pack', {'pack': key, 'path': str(dest)})
     print(dest)
 
 
